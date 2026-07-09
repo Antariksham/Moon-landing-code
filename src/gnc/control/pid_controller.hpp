@@ -80,17 +80,17 @@ namespace gnc {
  * see that function's contract for the exact acceptance criteria.
  */
 struct PidConfig {
-    F32 kp = 0.0F;  /**< Proportional gain. Range: [0, +finite). Unitless.   */
-    F32 ki = 0.0F;  /**< Integral gain. Range: [0, +finite). Per second.     */
-    F32 kd = 0.0F;  /**< Derivative gain. Range: [0, +finite). Seconds.      */
+    F32 kp = 0.0F; /**< Proportional gain. Range: [0, +finite). Unitless.   */
+    F32 ki = 0.0F; /**< Integral gain. Range: [0, +finite). Per second.     */
+    F32 kd = 0.0F; /**< Derivative gain. Range: [0, +finite). Seconds.      */
 
-    F32 output_min = 0.0F;  /**< Lower actuator limit. Must be < output_max. */
-    F32 output_max = 0.0F;  /**< Upper actuator limit. Must be > output_min. */
+    F32 output_min = 0.0F; /**< Lower actuator limit. Must be < output_max. */
+    F32 output_max = 0.0F; /**< Upper actuator limit. Must be > output_min. */
 
-    F32 integrator_min = 0.0F;  /**< Integrator floor. Must be <= 0 and
-                                     < integrator_max (windup clamp).        */
-    F32 integrator_max = 0.0F;  /**< Integrator ceiling. Must be >= 0 and
-                                     > integrator_min (windup clamp).        */
+    F32 integrator_min = 0.0F; /**< Integrator floor. Must be <= 0 and
+                                    < integrator_max (windup clamp).        */
+    F32 integrator_max = 0.0F; /**< Integrator ceiling. Must be >= 0 and
+                                    > integrator_min (windup clamp).        */
 };
 
 /**
@@ -172,9 +172,7 @@ class PidController {
      * @retval  Status::kErrNonFiniteInput @p setpoint or @p measurement is
      *                                     NaN or Inf.
      */
-    [[nodiscard]] Status Update(F32 setpoint,
-                                F32 measurement,
-                                F32 dt_s,
+    [[nodiscard]] Status Update(F32 setpoint, F32 measurement, F32 dt_s,
                                 F32* command_out) noexcept;
 
     /**
@@ -198,8 +196,8 @@ class PidController {
 
  private:
     PidConfig config_{};                /**< Validated copy of the config.   */
-    F32  integrator_ = 0.0F;            /**< Accumulated I-term, out. units. */
-    F32  prev_measurement_ = 0.0F;      /**< Measurement at previous cycle.  */
+    F32 integrator_ = 0.0F;             /**< Accumulated I-term, out. units. */
+    F32 prev_measurement_ = 0.0F;       /**< Measurement at previous cycle.  */
     bool has_prev_measurement_ = false; /**< First-cycle guard for D-term.   */
     bool is_initialized_ = false;       /**< Set only by a successful Init().*/
 };

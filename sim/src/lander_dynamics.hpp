@@ -34,19 +34,19 @@ constexpr F64 kLunarGravityMps2 = 1.625;
 
 /** @brief Vehicle and engine constants for the truth model. */
 struct VehicleParams {
-    F64 dry_mass_kg        = 280.0;   /**< Mass with tanks empty.          */
-    F64 propellant_mass_kg = 320.0;   /**< Usable propellant at sim start. */
-    F64 max_thrust_n       = 2500.0;  /**< Thrust at throttle = 1.0.       */
-    F64 min_throttle_frac  = 0.30;    /**< Deep-throttle floor; commands
-                                           below this clamp up to it.      */
-    F64 specific_impulse_s = 310.0;   /**< Isp for propellant depletion.   */
+    F64 dry_mass_kg = 280.0;        /**< Mass with tanks empty.          */
+    F64 propellant_mass_kg = 320.0; /**< Usable propellant at sim start. */
+    F64 max_thrust_n = 2500.0;      /**< Thrust at throttle = 1.0.       */
+    F64 min_throttle_frac = 0.30;   /**< Deep-throttle floor; commands
+                                         below this clamp up to it.      */
+    F64 specific_impulse_s = 310.0; /**< Isp for propellant depletion.   */
 };
 
 /** @brief Truth state of the 1-DOF lander. Up is positive. */
 struct LanderState {
-    F64 altitude_m   = 0.0;  /**< Height above the landing site.           */
-    F64 velocity_mps = 0.0;  /**< Vertical velocity; descent is negative.  */
-    F64 mass_kg      = 0.0;  /**< Total vehicle mass (dry + propellant).   */
+    F64 altitude_m = 0.0;   /**< Height above the landing site.           */
+    F64 velocity_mps = 0.0; /**< Vertical velocity; descent is negative.  */
+    F64 mass_kg = 0.0;      /**< Total vehicle mass (dry + propellant).   */
 };
 
 /**

@@ -11,9 +11,9 @@
  *            Licensed under the Apache License, Version 2.0.
  */
 
-#include "descent_sim.hpp"
-
 #include <gtest/gtest.h>
+
+#include "descent_sim.hpp"
 
 namespace lls {
 namespace sim {
@@ -42,20 +42,21 @@ TEST(DescentGuidance, CapsCommandAtMaxDescentRate) {
 
 TEST(DescentGuidance, ProfileIsContinuousAtTerminalGate) {
     const ScenarioParams params{};
-    const F64 just_above = ComputeDescentRateCommand(
-        params, params.terminal_altitude_m + 1.0e-9);
+    const F64 just_above =
+        ComputeDescentRateCommand(params, params.terminal_altitude_m + 1.0e-9);
     EXPECT_NEAR(just_above, -params.final_descent_rate_mps, 1.0e-3);
 }
 
 TEST(DescentGuidance, ProfileIsMonotonicInAltitude) {
     const ScenarioParams params{};
     F64 previous = ComputeDescentRateCommand(params, 0.0);
-    for (I32 h = 1; h <= 600; ++h) {  /* Bounded loop. */
+    for (I32 h = 1; h <= 600; ++h) { /* Bounded loop. */
         const F64 current =
             ComputeDescentRateCommand(params, static_cast<F64>(h));
         EXPECT_LE(current, previous + 1.0e-12)
             << "Commanded descent rate must not relax as altitude grows "
-               "(h = " << h << ")";
+               "(h = "
+            << h << ")";
         previous = current;
     }
 }
@@ -81,7 +82,7 @@ TEST(LanderDynamics, FreeFallMatchesKinematics) {
     ASSERT_EQ(dyn.Init(VehicleParams{}, 100.0, 0.0), Status::kSuccess);
 
     /* 2 s of engine-off fall at 1 kHz; compare with v = -g*t.           */
-    for (I32 i = 0; i < 2000; ++i) {  /* Bounded loop. */
+    for (I32 i = 0; i < 2000; ++i) { /* Bounded loop. */
         ASSERT_EQ(dyn.Step(0.0, 0.001), Status::kSuccess);
     }
     EXPECT_NEAR(dyn.GetState().velocity_mps, -kLunarGravityMps2 * 2.0, 0.01);
@@ -96,21 +97,20 @@ TEST(LanderDynamics, ClampsThrottleToDeepThrottleFloor) {
 
     /* Commanding 1% must produce the min-throttle acceleration, not 1%. */
     ASSERT_EQ(dyn.Step(0.01, 0.001), Status::kSuccess);
-    const F64 expected_accel =
-        (vp.min_throttle_frac * vp.max_thrust_n) /
-            (vp.dry_mass_kg + vp.propellant_mass_kg) -
-        kLunarGravityMps2;
+    const F64 expected_accel = (vp.min_throttle_frac * vp.max_thrust_n) /
+                                   (vp.dry_mass_kg + vp.propellant_mass_kg) -
+                               kLunarGravityMps2;
     EXPECT_NEAR(dyn.GetState().velocity_mps, expected_accel * 0.001, 1.0e-6);
 }
 
 TEST(LanderDynamics, NoThrustWhenPropellantExhausted) {
     LanderDynamics dyn;
     VehicleParams vp{};
-    vp.propellant_mass_kg = 0.001;  /* Nearly dry tanks. */
+    vp.propellant_mass_kg = 0.001; /* Nearly dry tanks. */
     ASSERT_EQ(dyn.Init(vp, 5000.0, 0.0), Status::kSuccess);
 
     /* Burn the tanks dry, then confirm full throttle produces free fall. */
-    for (I32 i = 0; i < 100; ++i) {  /* Bounded loop. */
+    for (I32 i = 0; i < 100; ++i) { /* Bounded loop. */
         ASSERT_EQ(dyn.Step(1.0, 0.01), Status::kSuccess);
     }
     ASSERT_DOUBLE_EQ(dyn.GetPropellantRemainingKg(), 0.0);
@@ -144,8 +144,8 @@ TEST(DescentSimClosedLoop, SurvivesDispersedGateConditions) {
      * (v^2 / 2h) is a guidance/mission-design violation upstream of the
      * controller, not a controller failure.                             */
     const ScenarioParams nominal{};
-    const F64 total_mass_kg = nominal.vehicle.dry_mass_kg +
-                              nominal.vehicle.propellant_mass_kg;
+    const F64 total_mass_kg =
+        nominal.vehicle.dry_mass_kg + nominal.vehicle.propellant_mass_kg;
     const F64 max_net_decel_mps2 =
         (nominal.vehicle.max_thrust_n / total_mass_kg) - kLunarGravityMps2;
 
@@ -153,11 +153,11 @@ TEST(DescentSimClosedLoop, SurvivesDispersedGateConditions) {
     const F64 velocities_mps[] = {-15.0, -30.0, -45.0};
 
     U32 flown = 0U;
-    for (const F64 h0 : altitudes_m) {          /* Bounded loops. */
+    for (const F64 h0 : altitudes_m) { /* Bounded loops. */
         for (const F64 v0 : velocities_mps) {
             const F64 required_decel_mps2 = (v0 * v0) / (2.0 * h0);
             if (required_decel_mps2 > (0.8 * max_net_decel_mps2)) {
-                continue;  /* Outside the vehicle's physical envelope.   */
+                continue; /* Outside the vehicle's physical envelope.   */
             }
             ++flown;
 
@@ -186,14 +186,14 @@ TEST(DescentSimClosedLoop, RejectsNullResultPointer) {
 TEST(DescentSimClosedLoop, TelemetryLogCapturesFullDescent) {
     const ScenarioParams params{};
     SimResult result{};
-    static TelemetryLog log;  /* ~1.4 MB: static, not stack. */
+    static TelemetryLog log; /* ~1.4 MB: static, not stack. */
     ASSERT_EQ(RunDescentSim(params, &result, &log), Status::kSuccess);
 
     ASSERT_GT(log.GetCount(), 0U);
     const TelemetrySample& first = log.GetSample(0U);
     const TelemetrySample& last = log.GetSample(log.GetCount() - 1U);
     EXPECT_DOUBLE_EQ(first.altitude_m, params.initial_altitude_m);
-    EXPECT_LT(last.altitude_m, 1.0);  /* Ends at (nearly) the surface.   */
+    EXPECT_LT(last.altitude_m, 1.0); /* Ends at (nearly) the surface.   */
 }
 
 }  // namespace

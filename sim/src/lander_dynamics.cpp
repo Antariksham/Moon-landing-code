@@ -18,11 +18,10 @@ namespace sim {
 namespace {
 
 [[nodiscard]] bool AreParamsValid(const VehicleParams& p) noexcept {
-    const bool finite = std::isfinite(p.dry_mass_kg) &&
-                        std::isfinite(p.propellant_mass_kg) &&
-                        std::isfinite(p.max_thrust_n) &&
-                        std::isfinite(p.min_throttle_frac) &&
-                        std::isfinite(p.specific_impulse_s);
+    const bool finite =
+        std::isfinite(p.dry_mass_kg) && std::isfinite(p.propellant_mass_kg) &&
+        std::isfinite(p.max_thrust_n) && std::isfinite(p.min_throttle_frac) &&
+        std::isfinite(p.specific_impulse_s);
     if (!finite) {
         return false;
     }
@@ -62,7 +61,7 @@ Status LanderDynamics::Step(const F64 throttle_cmd_frac,
         return Status::kErrInvalidParam;
     }
     if (touched_down_) {
-        return Status::kSuccess;  /* Sitting on the surface: nothing moves. */
+        return Status::kSuccess; /* Sitting on the surface: nothing moves. */
     }
 
     /* Engine model: 0 commands cutoff; anything else is clamped into the

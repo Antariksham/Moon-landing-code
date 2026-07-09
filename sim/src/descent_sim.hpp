@@ -37,35 +37,36 @@
 namespace lls {
 namespace sim {
 
-/** @brief Scenario configuration (defaults mirror config/landing_params.yaml). */
+/** @brief Scenario configuration (defaults mirror config/landing_params.yaml).
+ */
 struct ScenarioParams {
-    VehicleParams vehicle{};              /**< Truth-model constants.       */
+    VehicleParams vehicle{}; /**< Truth-model constants.       */
 
-    F64 initial_altitude_m   = 500.0;     /**< Terminal-descent gate.       */
-    F64 initial_velocity_mps = -30.0;     /**< Descending at handover.      */
+    F64 initial_altitude_m = 500.0;   /**< Terminal-descent gate.       */
+    F64 initial_velocity_mps = -30.0; /**< Descending at handover.      */
 
-    F64 control_rate_hz = 50.0;           /**< Flight control loop rate.    */
+    F64 control_rate_hz = 50.0; /**< Flight control loop rate.    */
 
     /* Guidance braking profile. */
-    F64 brake_decel_mps2       = 1.2;     /**< Envelope deceleration; must
-                                               be well under the vehicle's
-                                               max net decel (~2.5).        */
-    F64 max_descent_rate_mps   = 25.0;    /**< Speed cap on the envelope.   */
-    F64 final_descent_rate_mps = 1.0;     /**< Constant-rate final segment. */
-    F64 terminal_altitude_m    = 10.0;    /**< Start of the final segment.  */
-    F64 engine_cutoff_altitude_m = 0.5;   /**< Free-fall below this.        */
+    F64 brake_decel_mps2 = 1.2;         /**< Envelope deceleration; must
+                                             be well under the vehicle's
+                                             max net decel (~2.5).        */
+    F64 max_descent_rate_mps = 25.0;    /**< Speed cap on the envelope.   */
+    F64 final_descent_rate_mps = 1.0;   /**< Constant-rate final segment. */
+    F64 terminal_altitude_m = 10.0;     /**< Start of the final segment.  */
+    F64 engine_cutoff_altitude_m = 0.5; /**< Free-fall below this.        */
 
-    F64 max_sim_duration_s = 600.0;       /**< Hard bound on the sim loop.  */
+    F64 max_sim_duration_s = 600.0; /**< Hard bound on the sim loop.  */
 };
 
 /** @brief One telemetry sample of the closed-loop run. */
 struct TelemetrySample {
-    F64 time_s        = 0.0;
-    F64 altitude_m    = 0.0;
-    F64 velocity_mps  = 0.0;
+    F64 time_s = 0.0;
+    F64 altitude_m = 0.0;
+    F64 velocity_mps = 0.0;
     F64 velocity_cmd_mps = 0.0;
     F64 throttle_frac = 0.0;
-    F64 mass_kg       = 0.0;
+    F64 mass_kg = 0.0;
 };
 
 /** @brief Outcome of a completed (or aborted) run. */

@@ -76,8 +76,7 @@ namespace {
 
 }  // namespace
 
-Status RunDescentSim(const ScenarioParams& params,
-                     SimResult* const result_out,
+Status RunDescentSim(const ScenarioParams& params, SimResult* const result_out,
                      TelemetryLog* const log_out) noexcept {
     if (result_out == nullptr) {
         return Status::kErrInvalidParam;
@@ -124,10 +123,10 @@ Status RunDescentSim(const ScenarioParams& params,
                                        params.vehicle.max_thrust_n;
 
             F32 correction = 0.0F;
-            const Status pid_status = descent_rate_pid.Update(
-                static_cast<F32>(v_cmd_mps),
-                static_cast<F32>(truth.velocity_mps),
-                static_cast<F32>(dt_s), &correction);
+            const Status pid_status =
+                descent_rate_pid.Update(static_cast<F32>(v_cmd_mps),
+                                        static_cast<F32>(truth.velocity_mps),
+                                        static_cast<F32>(dt_s), &correction);
             if (!IsSuccess(pid_status) &&
                 (pid_status != Status::kErrSaturated)) {
                 ++result_out->controller_fault_count;

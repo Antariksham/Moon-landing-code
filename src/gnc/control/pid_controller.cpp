@@ -28,8 +28,7 @@ namespace {
  * @param   high   Interval upper bound.
  * @return  The nearest value inside [low, high].
  */
-[[nodiscard]] constexpr F32 ClampF32(const F32 value,
-                                     const F32 low,
+[[nodiscard]] constexpr F32 ClampF32(const F32 value, const F32 low,
                                      const F32 high) noexcept {
     return (value < low) ? low : ((value > high) ? high : value);
 }
@@ -80,16 +79,14 @@ Status PidController::Init(const PidConfig& config) noexcept {
     return Status::kSuccess;
 }
 
-Status PidController::Update(const F32 setpoint,
-                             const F32 measurement,
-                             const F32 dt_s,
-                             F32* const command_out) noexcept {
+Status PidController::Update(const F32 setpoint, const F32 measurement,
+                             const F32 dt_s, F32* const command_out) noexcept {
     /* --- Contract checks: reject, never propagate, bad inputs. ---------- */
     if (!is_initialized_) {
         return Status::kErrNotInitialized;
     }
     if (command_out == nullptr) {
-        LLS_ASSERT(command_out != nullptr);  /* Programmer error: report.   */
+        LLS_ASSERT(command_out != nullptr); /* Programmer error: report.   */
         return Status::kErrInvalidParam;
     }
     if (!std::isfinite(dt_s) || (dt_s <= 0.0F) || (dt_s > kMaxDtSeconds)) {
@@ -119,26 +116,24 @@ Status PidController::Update(const F32 setpoint,
     has_prev_measurement_ = true;
 
     /* --- Tentative integrator step (committed only if it won't wind up). */
-    const F32 integrator_candidate = ClampF32(
-        integrator_ + (config_.ki * error * dt_s),
-        config_.integrator_min,
-        config_.integrator_max);
+    const F32 integrator_candidate =
+        ClampF32(integrator_ + (config_.ki * error * dt_s),
+                 config_.integrator_min, config_.integrator_max);
 
     /* --- Combine and saturate. ------------------------------------------ */
     const F32 unsaturated = p_term + integrator_candidate + d_term;
-    const F32 command = ClampF32(unsaturated,
-                                 config_.output_min,
-                                 config_.output_max);
+    const F32 command =
+        ClampF32(unsaturated, config_.output_min, config_.output_max);
 
     /* --- Conditional-integration anti-windup. ---------------------------
      * Commit the integrator step unless the output is saturated AND the
      * error is pushing further into that same limit. During a long
      * throttle-limited braking burn this freezes the integrator instead of
      * letting it charge for minutes and then overshoot on recovery.       */
-    const bool pushing_past_max = (unsaturated > config_.output_max) &&
-                                  (error > 0.0F);
-    const bool pushing_past_min = (unsaturated < config_.output_min) &&
-                                  (error < 0.0F);
+    const bool pushing_past_max =
+        (unsaturated > config_.output_max) && (error > 0.0F);
+    const bool pushing_past_min =
+        (unsaturated < config_.output_min) && (error < 0.0F);
     if (!pushing_past_max && !pushing_past_min) {
         integrator_ = integrator_candidate;
     }

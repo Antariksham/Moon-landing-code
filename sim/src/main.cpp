@@ -52,7 +52,7 @@ void PrintUsage(const char* prog) {
     std::fprintf(file,
                  "time_s,altitude_m,velocity_mps,velocity_cmd_mps,"
                  "throttle_frac,mass_kg\n");
-    for (lls::U32 i = 0U; i < log.GetCount(); ++i) {  /* Bounded loop. */
+    for (lls::U32 i = 0U; i < log.GetCount(); ++i) { /* Bounded loop. */
         const lls::sim::TelemetrySample& s = log.GetSample(i);
         std::fprintf(file, "%.3f,%.3f,%.4f,%.4f,%.4f,%.3f\n", s.time_s,
                      s.altitude_m, s.velocity_mps, s.velocity_cmd_mps,
@@ -68,7 +68,7 @@ int main(const int argc, const char** const argv) {
     lls::sim::ScenarioParams params{};
     const char* telemetry_path = nullptr;
 
-    for (int i = 1; i < argc; ++i) {  /* Bounded by argc. */
+    for (int i = 1; i < argc; ++i) { /* Bounded by argc. */
         const bool has_value = ((i + 1) < argc);
         if ((std::strcmp(argv[i], "--initial-altitude-m") == 0) && has_value) {
             params.initial_altitude_m = std::atof(argv[i + 1]);
@@ -102,9 +102,8 @@ int main(const int argc, const char** const argv) {
         return EXIT_FAILURE;
     }
 
-    const bool safe = result.touched_down &&
-                      (result.touchdown_speed_mps <=
-                       kTouchdownVelocityLimitMps);
+    const bool safe = result.touched_down && (result.touchdown_speed_mps <=
+                                              kTouchdownVelocityLimitMps);
 
     std::printf("=== SELENE 1-DOF descent report ===\n");
     std::printf("Gate:              %.1f m at %.1f m/s\n",
@@ -117,8 +116,9 @@ int main(const int argc, const char** const argv) {
     std::printf("Propellant used:   %.1f kg\n", result.propellant_used_kg);
     std::printf("Controller faults: %u\n",
                 static_cast<unsigned>(result.controller_fault_count));
-    std::printf("Verdict:           %s\n", safe ? "SAFE LANDING" : "LOSS OF "
-                                                                   "VEHICLE");
+    std::printf("Verdict:           %s\n", safe ? "SAFE LANDING"
+                                                : "LOSS OF "
+                                                  "VEHICLE");
 
     return safe ? EXIT_SUCCESS : EXIT_FAILURE;
 }
