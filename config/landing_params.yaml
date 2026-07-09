@@ -1,0 +1,41 @@
+# Project SELENE — mission & vehicle parameters (technology demonstrator).
+# Values here are PLACEHOLDERS for SIL development, not flight-tuned.
+# Any change to this file requires a closed-loop SIL regression run.
+
+mission:
+  target_body: moon
+  gravity_mps2: 1.625              # Lunar surface gravity
+  landing_site:
+    latitude_deg: -84.5            # Notional south-pole region site
+    longitude_deg: 31.2
+    elevation_m: 0.0
+
+vehicle:
+  dry_mass_kg: 280.0
+  propellant_mass_kg: 320.0
+  main_engine:
+    max_thrust_n: 4500.0
+    min_throttle_frac: 0.30        # Deep-throttle floor
+    max_throttle_frac: 1.00
+
+control:
+  loop_rate_hz: 50
+  descent_rate_pid:                # See src/gnc/control/pid_controller.hpp
+    kp: 0.8
+    ki: 0.15
+    kd: 0.05
+    output_min: 0.30               # Matches engine min throttle
+    output_max: 1.00
+    integrator_min: -0.20
+    integrator_max: 0.20
+
+terminal_descent:
+  target_descent_rate_mps: 1.0     # Constant-velocity final segment
+  touchdown_velocity_limit_mps: 2.0
+  engine_cutoff_altitude_m: 0.5
+
+hazard_avoidance:
+  max_site_slope_deg: 10.0
+  max_roughness_m: 0.30
+  min_safe_site_radius_m: 4.0
+  max_divert_distance_m: 300.0

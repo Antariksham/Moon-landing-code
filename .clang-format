@@ -1,0 +1,13 @@
+# Project SELENE — canonical formatting. CI enforces this; do not debate
+# style in review.
+BasedOnStyle: Google
+Standard: c++17
+ColumnLimit: 80
+IndentWidth: 4
+AccessModifierOffset: -3
+DerivePointerAlignment: false
+PointerAlignment: Left
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+IncludeBlocks: Regroup
