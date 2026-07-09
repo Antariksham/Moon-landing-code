@@ -11,9 +11,9 @@
  *            Licensed under the Apache License, Version 2.0.
  */
 
-#include "fsw/mission_state_machine.hpp"
-
 #include <gtest/gtest.h>
+
+#include "fsw/mission_state_machine.hpp"
 
 namespace lls {
 namespace fsw {
@@ -23,20 +23,20 @@ namespace {
 /* Compile-time phase-graph audits (rule: fail at build, not in orbit) */
 /* ------------------------------------------------------------------ */
 
-static_assert(MissionStateMachine::IsTransitionLegal(
-                  MissionPhase::kBoot, MissionPhase::kStandby),
+static_assert(MissionStateMachine::IsTransitionLegal(MissionPhase::kBoot,
+                                                     MissionPhase::kStandby),
               "Nominal timeline must begin BOOT -> STANDBY");
 
-static_assert(!MissionStateMachine::IsTransitionLegal(
-                  MissionPhase::kStandby, MissionPhase::kTouchdown),
+static_assert(!MissionStateMachine::IsTransitionLegal(MissionPhase::kStandby,
+                                                      MissionPhase::kTouchdown),
               "Timeline phases must not be skippable");
 
-static_assert(!MissionStateMachine::IsTransitionLegal(
-                  MissionPhase::kTouchdown, MissionPhase::kSafeMode),
+static_assert(!MissionStateMachine::IsTransitionLegal(MissionPhase::kTouchdown,
+                                                      MissionPhase::kSafeMode),
               "Once on the surface, safe mode must be unreachable");
 
-static_assert(!MissionStateMachine::IsTransitionLegal(
-                  MissionPhase::kSafed, MissionPhase::kStandby),
+static_assert(!MissionStateMachine::IsTransitionLegal(MissionPhase::kSafed,
+                                                      MissionPhase::kStandby),
               "SAFED is terminal: no edge may leave it");
 
 /* ------------------------------------------------------------------ */
@@ -52,12 +52,12 @@ TEST(MissionStateMachine, StartsInBoot) {
 TEST(MissionStateMachine, WalksNominalDescentTimeline) {
     MissionStateMachine sm;
     const MissionPhase timeline[] = {
-        MissionPhase::kStandby,   MissionPhase::kDeorbit,
-        MissionPhase::kBraking,   MissionPhase::kApproach,
+        MissionPhase::kStandby,         MissionPhase::kDeorbit,
+        MissionPhase::kBraking,         MissionPhase::kApproach,
         MissionPhase::kTerminalDescent, MissionPhase::kTouchdown,
         MissionPhase::kSafed,
     };
-    for (const MissionPhase next : timeline) {  /* Bounded loop (rule #3). */
+    for (const MissionPhase next : timeline) { /* Bounded loop (rule #3). */
         ASSERT_EQ(sm.RequestTransition(next), Status::kSuccess);
         ASSERT_EQ(sm.GetPhase(), next);
     }
@@ -85,11 +85,11 @@ TEST(MissionStateMachine, RejectsCorruptedPhaseValue) {
 
 TEST(MissionStateMachine, SafeModeReachableFromEveryInFlightPhase) {
     const MissionPhase in_flight[] = {
-        MissionPhase::kStandby, MissionPhase::kDeorbit,
-        MissionPhase::kBraking, MissionPhase::kApproach,
+        MissionPhase::kStandby,         MissionPhase::kDeorbit,
+        MissionPhase::kBraking,         MissionPhase::kApproach,
         MissionPhase::kTerminalDescent,
     };
-    for (const MissionPhase phase : in_flight) {  /* Bounded loop.        */
+    for (const MissionPhase phase : in_flight) { /* Bounded loop.        */
         EXPECT_TRUE(MissionStateMachine::IsTransitionLegal(
             phase, MissionPhase::kSafeMode))
             << "Safe mode unreachable from phase "

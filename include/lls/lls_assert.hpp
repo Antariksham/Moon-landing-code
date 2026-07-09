@@ -56,12 +56,12 @@ void ReportAssertFailure(const char* file, I32 line) noexcept;
  * continues — the enclosing function is responsible for returning a suitable
  * `Status`. Enabled in all build types, including flight Release builds.
  */
-#define LLS_ASSERT(expr)                                                    \
-    do {                                                                    \
-        if (!(expr)) {                                                      \
-            ::lls::ReportAssertFailure(__FILE__,                            \
+#define LLS_ASSERT(expr)                                                   \
+    do {                                                                   \
+        if (!(expr)) {                                                     \
+            ::lls::ReportAssertFailure(__FILE__,                           \
                                        static_cast<::lls::I32>(__LINE__)); \
-        }                                                                   \
+        }                                                                  \
     } while (false)
 
 #endif  // LLS_LLS_ASSERT_HPP

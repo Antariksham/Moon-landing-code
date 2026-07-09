@@ -234,8 +234,12 @@ cmake --build build-target -j
 ```bash
 cmake -B build -DLLS_BUILD_SIM=ON
 cmake --build build -j
-./build/sim/selene_sim --config config/landing_params.yaml
+./build/sim/selene_sim --telemetry descent.csv
 ```
+
+The exit code is the verdict — `0` means touchdown within the 2 m/s limit —
+so the simulator doubles as a CI gate. See [`sim/README.md`](sim/README.md)
+for the scenario details and CLI flags.
 
 ---
 

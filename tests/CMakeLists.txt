@@ -21,6 +21,12 @@ target_link_libraries(selene_unit_tests PRIVATE
     selene_fsw
     GTest::gtest_main)
 
+# Closed-loop SIL regression tests ride along when the sim is enabled.
+if(TARGET selene_sim_core)
+    target_sources(selene_unit_tests PRIVATE sim/test_descent_sim.cpp)
+    target_link_libraries(selene_unit_tests PRIVATE selene_sim_core)
+endif()
+
 target_compile_options(selene_unit_tests PRIVATE
     -Wall -Wextra -Werror)
 

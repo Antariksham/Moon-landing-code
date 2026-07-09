@@ -47,15 +47,15 @@ namespace fsw {
  * telemetry stream and must never be renumbered (rule #7).
  */
 enum class MissionPhase : U8 {
-    kBoot            = 0U,  /**< Power-on self test, memory scrub.          */
-    kStandby         = 1U,  /**< Healthy and idle in lunar orbit.           */
-    kDeorbit         = 2U,  /**< Deorbit burn to descent-orbit insertion.   */
-    kBraking         = 3U,  /**< Main braking burn, killing orbital speed.  */
-    kApproach        = 4U,  /**< Pitch-over; HDA scans for a safe site.     */
-    kTerminalDescent = 5U,  /**< Vertical descent to the selected site.     */
-    kTouchdown       = 6U,  /**< Surface contact detected; engines cut.     */
-    kSafed           = 7U,  /**< Landed, vented, and passivated. Terminal.  */
-    kSafeMode        = 8U,  /**< FDIR refuge from any in-flight fault.      */
+    kBoot = 0U,            /**< Power-on self test, memory scrub.          */
+    kStandby = 1U,         /**< Healthy and idle in lunar orbit.           */
+    kDeorbit = 2U,         /**< Deorbit burn to descent-orbit insertion.   */
+    kBraking = 3U,         /**< Main braking burn, killing orbital speed.  */
+    kApproach = 4U,        /**< Pitch-over; HDA scans for a safe site.     */
+    kTerminalDescent = 5U, /**< Vertical descent to the selected site.     */
+    kTouchdown = 6U,       /**< Surface contact detected; engines cut.     */
+    kSafed = 7U,           /**< Landed, vented, and passivated. Terminal.  */
+    kSafeMode = 8U,        /**< FDIR refuge from any in-flight fault.      */
 };
 
 /** @brief Number of values in `MissionPhase` (bounds checks, telemetry). */
@@ -72,8 +72,8 @@ class MissionStateMachine {
  public:
     /** @brief One legal edge of the phase graph. */
     struct Transition {
-        MissionPhase from;  /**< Phase the vehicle must currently be in.    */
-        MissionPhase to;    /**< Phase the vehicle is allowed to enter.     */
+        MissionPhase from; /**< Phase the vehicle must currently be in.    */
+        MissionPhase to;   /**< Phase the vehicle is allowed to enter.     */
     };
 
     /** @brief Starts in `MissionPhase::kBoot`; no `Init()` step required. */
@@ -132,7 +132,7 @@ class MissionStateMachine {
      */
     [[nodiscard]] static constexpr bool IsTransitionLegal(
         const MissionPhase from, const MissionPhase to) noexcept {
-        for (const Transition& edge : kTransitionTable) {  /* Bounded loop. */
+        for (const Transition& edge : kTransitionTable) { /* Bounded loop. */
             if ((edge.from == from) && (edge.to == to)) {
                 return true;
             }
@@ -153,34 +153,34 @@ class MissionStateMachine {
     static constexpr std::array<Transition, kTransitionTableSize>
         kTransitionTable = {{
             /* Nominal descent timeline. */
-            {MissionPhase::kBoot,            MissionPhase::kStandby},
-            {MissionPhase::kStandby,         MissionPhase::kDeorbit},
-            {MissionPhase::kDeorbit,         MissionPhase::kBraking},
-            {MissionPhase::kBraking,         MissionPhase::kApproach},
-            {MissionPhase::kApproach,        MissionPhase::kTerminalDescent},
+            {MissionPhase::kBoot, MissionPhase::kStandby},
+            {MissionPhase::kStandby, MissionPhase::kDeorbit},
+            {MissionPhase::kDeorbit, MissionPhase::kBraking},
+            {MissionPhase::kBraking, MissionPhase::kApproach},
+            {MissionPhase::kApproach, MissionPhase::kTerminalDescent},
             {MissionPhase::kTerminalDescent, MissionPhase::kTouchdown},
-            {MissionPhase::kTouchdown,       MissionPhase::kSafed},
+            {MissionPhase::kTouchdown, MissionPhase::kSafed},
 
             /* Abort-to-orbit style hold: guidance may fall back one phase. */
-            {MissionPhase::kApproach,        MissionPhase::kBraking},
+            {MissionPhase::kApproach, MissionPhase::kBraking},
 
             /* FDIR: safe mode reachable from every in-flight phase.       */
-            {MissionPhase::kStandby,         MissionPhase::kSafeMode},
-            {MissionPhase::kDeorbit,         MissionPhase::kSafeMode},
-            {MissionPhase::kBraking,         MissionPhase::kSafeMode},
-            {MissionPhase::kApproach,        MissionPhase::kSafeMode},
+            {MissionPhase::kStandby, MissionPhase::kSafeMode},
+            {MissionPhase::kDeorbit, MissionPhase::kSafeMode},
+            {MissionPhase::kBraking, MissionPhase::kSafeMode},
+            {MissionPhase::kApproach, MissionPhase::kSafeMode},
             {MissionPhase::kTerminalDescent, MissionPhase::kSafeMode},
 
             /* Recovery: ground command returns safe mode to standby.      */
-            {MissionPhase::kSafeMode,        MissionPhase::kStandby},
+            {MissionPhase::kSafeMode, MissionPhase::kStandby},
 
             /* Boot faults park in safe mode pending ground contact.       */
-            {MissionPhase::kBoot,            MissionPhase::kSafeMode},
+            {MissionPhase::kBoot, MissionPhase::kSafeMode},
         }};
 
  private:
-    MissionPhase phase_ = MissionPhase::kBoot;  /**< Current phase.         */
-    U32 rejected_transition_count_ = 0U;        /**< Telemetry counter.     */
+    MissionPhase phase_ = MissionPhase::kBoot; /**< Current phase.         */
+    U32 rejected_transition_count_ = 0U;       /**< Telemetry counter.     */
 };
 
 }  // namespace fsw

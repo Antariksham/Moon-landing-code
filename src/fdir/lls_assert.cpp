@@ -27,7 +27,7 @@ void ReportAssertFailure(const char* file, const I32 line) noexcept {
     static_cast<void>(file);
     static_cast<void>(line);
 
-    ++g_assert_failure_count;  /* U32 wrap-around is defined and acceptable. */
+    ++g_assert_failure_count; /* U32 wrap-around is defined and acceptable. */
 }
 
 U32 GetAssertFailureCount() noexcept {

@@ -22,15 +22,15 @@ namespace lls {
 /* Fixed-width scalar aliases (rule #4: no bare int/long/unsigned).          */
 /* ------------------------------------------------------------------------ */
 
-using I8  = std::int8_t;    /**< Signed  8-bit integer.  */
-using I16 = std::int16_t;   /**< Signed 16-bit integer.  */
-using I32 = std::int32_t;   /**< Signed 32-bit integer.  */
-using I64 = std::int64_t;   /**< Signed 64-bit integer.  */
+using I8 = std::int8_t;   /**< Signed  8-bit integer.  */
+using I16 = std::int16_t; /**< Signed 16-bit integer.  */
+using I32 = std::int32_t; /**< Signed 32-bit integer.  */
+using I64 = std::int64_t; /**< Signed 64-bit integer.  */
 
-using U8  = std::uint8_t;   /**< Unsigned  8-bit integer. */
-using U16 = std::uint16_t;  /**< Unsigned 16-bit integer. */
-using U32 = std::uint32_t;  /**< Unsigned 32-bit integer. */
-using U64 = std::uint64_t;  /**< Unsigned 64-bit integer. */
+using U8 = std::uint8_t;   /**< Unsigned  8-bit integer. */
+using U16 = std::uint16_t; /**< Unsigned 16-bit integer. */
+using U32 = std::uint32_t; /**< Unsigned 32-bit integer. */
+using U64 = std::uint64_t; /**< Unsigned 64-bit integer. */
 
 /**
  * @brief 32-bit IEEE-754 floating point.
@@ -41,7 +41,7 @@ using U64 = std::uint64_t;  /**< Unsigned 64-bit integer. */
  * justification in the header of the module that uses it.
  */
 using F32 = float;
-using F64 = double;         /**< 64-bit IEEE-754 — requires documented need. */
+using F64 = double; /**< 64-bit IEEE-754 — requires documented need. */
 
 static_assert(sizeof(F32) == 4U, "F32 must be 32 bits on this target");
 static_assert(sizeof(F64) == 8U, "F64 must be 64 bits on this target");
@@ -58,12 +58,12 @@ static_assert(sizeof(F64) == 8U, "F64 must be 64 bits on this target");
  * Values are stable across builds: they appear verbatim in telemetry.
  */
 enum class Status : U8 {
-    kSuccess           = 0U,  /**< Operation completed nominally.            */
-    kErrNotInitialized = 1U,  /**< Component used before successful init.    */
-    kErrInvalidParam   = 2U,  /**< Argument outside its documented range.    */
-    kErrNonFiniteInput = 3U,  /**< NaN or Inf received on a real-typed input.*/
+    kSuccess = 0U,           /**< Operation completed nominally.            */
+    kErrNotInitialized = 1U, /**< Component used before successful init.    */
+    kErrInvalidParam = 2U,   /**< Argument outside its documented range.    */
+    kErrNonFiniteInput = 3U, /**< NaN or Inf received on a real-typed input.*/
     kErrIllegalTransition = 4U, /**< Rejected mission-phase transition.      */
-    kErrSaturated      = 5U,  /**< Output limited; result is safe but clipped.*/
+    kErrSaturated = 5U, /**< Output limited; result is safe but clipped.*/
 };
 
 /**

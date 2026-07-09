@@ -11,18 +11,18 @@
  *            Licensed under the Apache License, Version 2.0.
  */
 
-#include "gnc/control/pid_controller.hpp"
+#include <gtest/gtest.h>
 
 #include <cmath>
 #include <limits>
 
-#include <gtest/gtest.h>
+#include "gnc/control/pid_controller.hpp"
 
 namespace lls {
 namespace gnc {
 namespace {
 
-constexpr F32 kDt = 0.02F;  /* Nominal 50 Hz control interval. */
+constexpr F32 kDt = 0.02F; /* Nominal 50 Hz control interval. */
 
 /** @brief Returns a configuration accepted by Init() in every test. */
 PidConfig MakeValidConfig() {
@@ -71,7 +71,7 @@ TEST(PidControllerInit, RejectsInvertedOutputLimits) {
 TEST(PidControllerInit, RejectsIntegratorRangeExcludingZero) {
     PidController ctrl;
     PidConfig cfg = MakeValidConfig();
-    cfg.integrator_min = 0.1F;  /* Reset()->0 would be out of range. */
+    cfg.integrator_min = 0.1F; /* Reset()->0 would be out of range. */
     cfg.integrator_max = 0.5F;
     EXPECT_EQ(ctrl.Init(cfg), Status::kErrInvalidParam);
 }
@@ -85,8 +85,7 @@ TEST(PidControllerInit, FailedReInitDisarmsController) {
     ASSERT_EQ(ctrl.Init(bad), Status::kErrInvalidParam);
 
     F32 cmd = 0.0F;
-    EXPECT_EQ(ctrl.Update(0.0F, 0.0F, kDt, &cmd),
-              Status::kErrNotInitialized);
+    EXPECT_EQ(ctrl.Update(0.0F, 0.0F, kDt, &cmd), Status::kErrNotInitialized);
 }
 
 /* ------------------------------------------------------------------ */
@@ -96,35 +95,31 @@ TEST(PidControllerInit, FailedReInitDisarmsController) {
 TEST(PidControllerUpdate, RefusesWhenUninitialized) {
     PidController ctrl;
     F32 cmd = 123.0F;
-    EXPECT_EQ(ctrl.Update(1.0F, 0.0F, kDt, &cmd),
-              Status::kErrNotInitialized);
-    EXPECT_EQ(cmd, 123.0F);  /* Output untouched on failure. */
+    EXPECT_EQ(ctrl.Update(1.0F, 0.0F, kDt, &cmd), Status::kErrNotInitialized);
+    EXPECT_EQ(cmd, 123.0F); /* Output untouched on failure. */
 }
 
 TEST(PidControllerUpdate, RejectsNullOutputPointer) {
     PidController ctrl;
     ASSERT_EQ(ctrl.Init(MakeValidConfig()), Status::kSuccess);
-    EXPECT_EQ(ctrl.Update(1.0F, 0.0F, kDt, nullptr),
-              Status::kErrInvalidParam);
+    EXPECT_EQ(ctrl.Update(1.0F, 0.0F, kDt, nullptr), Status::kErrInvalidParam);
 }
 
 TEST(PidControllerUpdate, RejectsNonPositiveDt) {
     PidController ctrl;
     ASSERT_EQ(ctrl.Init(MakeValidConfig()), Status::kSuccess);
     F32 cmd = 0.0F;
-    EXPECT_EQ(ctrl.Update(1.0F, 0.0F, 0.0F, &cmd),
-              Status::kErrInvalidParam);
-    EXPECT_EQ(ctrl.Update(1.0F, 0.0F, -kDt, &cmd),
-              Status::kErrInvalidParam);
+    EXPECT_EQ(ctrl.Update(1.0F, 0.0F, 0.0F, &cmd), Status::kErrInvalidParam);
+    EXPECT_EQ(ctrl.Update(1.0F, 0.0F, -kDt, &cmd), Status::kErrInvalidParam);
 }
 
 TEST(PidControllerUpdate, RejectsDtBeyondOverrunBound) {
     PidController ctrl;
     ASSERT_EQ(ctrl.Init(MakeValidConfig()), Status::kSuccess);
     F32 cmd = 0.0F;
-    EXPECT_EQ(ctrl.Update(1.0F, 0.0F,
-                          PidController::kMaxDtSeconds * 2.0F, &cmd),
-              Status::kErrInvalidParam);
+    EXPECT_EQ(
+        ctrl.Update(1.0F, 0.0F, PidController::kMaxDtSeconds * 2.0F, &cmd),
+        Status::kErrInvalidParam);
 }
 
 TEST(PidControllerUpdate, RejectsNonFiniteSetpointAndMeasurement) {
@@ -136,7 +131,7 @@ TEST(PidControllerUpdate, RejectsNonFiniteSetpointAndMeasurement) {
 
     EXPECT_EQ(ctrl.Update(nan, 0.0F, kDt, &cmd), Status::kErrNonFiniteInput);
     EXPECT_EQ(ctrl.Update(0.0F, inf, kDt, &cmd), Status::kErrNonFiniteInput);
-    EXPECT_EQ(cmd, 55.0F);  /* Previous safe command preserved. */
+    EXPECT_EQ(cmd, 55.0F); /* Previous safe command preserved. */
 }
 
 /* ------------------------------------------------------------------ */
@@ -165,7 +160,7 @@ TEST(PidControllerUpdate, DerivativeActsOnMeasurementNotSetpoint) {
     PidController ctrl;
     PidConfig cfg = MakeValidConfig();
     cfg.kp = 0.0F;
-    cfg.ki = 0.0F;   /* Isolate the D term. */
+    cfg.ki = 0.0F; /* Isolate the D term. */
     cfg.kd = 0.1F;
     ASSERT_EQ(ctrl.Init(cfg), Status::kSuccess);
 
@@ -208,7 +203,7 @@ TEST(PidControllerUpdate, IntegratorFreezesWhileSaturated) {
 TEST(PidControllerUpdate, IntegratorClampHolds) {
     PidController ctrl;
     PidConfig cfg = MakeValidConfig();
-    cfg.kp = 0.0F;   /* Keep output unsaturated so the integrator runs.  */
+    cfg.kp = 0.0F; /* Keep output unsaturated so the integrator runs.  */
     cfg.kd = 0.0F;
     cfg.ki = 10.0F;
     ASSERT_EQ(ctrl.Init(cfg), Status::kSuccess);
