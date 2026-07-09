@@ -43,16 +43,17 @@ target_include_directories(selene_fsw PUBLIC
 target_link_libraries(selene_fsw PRIVATE lls_flight_options)
 
 # ---------------------------------------------------------------------------
+# Software-in-the-loop simulator (host only; before tests so the test
+# suite can pick up the closed-loop SIL tests when both are enabled)
+# ---------------------------------------------------------------------------
+if(LLS_BUILD_SIM AND NOT CMAKE_CROSSCOMPILING)
+    add_subdirectory(sim)
+endif()
+
+# ---------------------------------------------------------------------------
 # Unit tests (host only; GoogleTest fetched automatically)
 # ---------------------------------------------------------------------------
 if(LLS_BUILD_TESTS AND NOT CMAKE_CROSSCOMPILING)
     enable_testing()
     add_subdirectory(tests)
-endif()
-
-# ---------------------------------------------------------------------------
-# Software-in-the-loop simulator (host only)
-# ---------------------------------------------------------------------------
-if(LLS_BUILD_SIM AND NOT CMAKE_CROSSCOMPILING)
-    add_subdirectory(sim)
 endif()

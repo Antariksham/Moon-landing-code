@@ -14,18 +14,29 @@ vehicle:
   dry_mass_kg: 280.0
   propellant_mass_kg: 320.0
   main_engine:
-    max_thrust_n: 4500.0
+    # 2500 N keeps min-throttle thrust (750 N) below lunar weight at all
+    # vehicle masses, so a steady terminal descent is physically possible.
+    # (The earlier 4500 N placeholder violated this: 0.3 * 4500 = 1350 N
+    # exceeds the ~975 N lunar weight — the vehicle could never descend at
+    # constant rate with the engine lit.)
+    max_thrust_n: 2500.0
     min_throttle_frac: 0.30        # Deep-throttle floor
     max_throttle_frac: 1.00
+    specific_impulse_s: 310.0
 
 control:
   loop_rate_hz: 50
   descent_rate_pid:                # See src/gnc/control/pid_controller.hpp
+    # The PID outputs a throttle CORRECTION around the mass-feedforward
+    # hover throttle (m*g / T_max); the engine model enforces the real
+    # [min_throttle, 1.0] band. See sim/src/descent_sim.cpp.
     kp: 0.8
     ki: 0.15
     kd: 0.05
-    output_min: 0.30               # Matches engine min throttle
-    output_max: 1.00
+    # +/-0.7 spans the full engine band around hover (~0.36-0.39), so hot
+    # gates can command maximum thrust.
+    output_min: -0.70
+    output_max: 0.70
     integrator_min: -0.20
     integrator_max: 0.20
 

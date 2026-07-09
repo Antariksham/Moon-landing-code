@@ -13,13 +13,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DLLS_BUILD_TESTS=ON
+        run: >
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug
+          -DLLS_BUILD_TESTS=ON -DLLS_BUILD_SIM=ON
 
       - name: Build (warnings are errors)
         run: cmake --build build -j
 
-      - name: Run unit tests
+      - name: Run unit + closed-loop SIL tests
         run: ctest --test-dir build --output-on-failure
+
+      - name: Fly the nominal descent (exit code is the verdict)
+        run: ./build/sim/selene_sim
 
   format:
     name: clang-format check
