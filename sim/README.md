@@ -30,11 +30,41 @@ limit), so the sim doubles as a CI gate. The closed-loop regression tests
 in `tests/sim/` fly the full descent — including dispersed gate conditions —
 on every test run.
 
+## Milestone 2 (implemented): 3-DOF planar approach with pitch-over
+
+`selene_sim --mode 3dof` flies the full approach phase from the 2 km
+handover gate (default: 60 m/s ground speed, −30 m/s descent, braking
+attitude) through the pitch-over maneuver to a vertical terminal descent
+and touchdown:
+
+- **Truth dynamics** (`src/lander_dynamics_3dof.hpp`) — planar rigid body
+  (downrange, altitude, pitch) with a body-fixed main engine and
+  torque-limited RCS pitch control.
+- **Flight guidance** (`src/gnc/guidance/descent_guidance.hpp`) —
+  altitude-keyed velocity references: the milestone 1 vertical braking
+  envelope plus a horizontal ramp that forces ground speed to zero at the
+  pitch-over altitude (150 m).
+- **Flight control** — three `lls::gnc::PidController` loops (horizontal
+  velocity, vertical velocity, pitch attitude) and the
+  `lls::gnc::ThrustAllocator`, which splits the commanded acceleration
+  vector into a pitch reference and a throttle command.
+- **Flight executive** — the real `lls::fsw::MissionStateMachine` is
+  sequenced APPROACH → TERMINAL_DESCENT → TOUCHDOWN → SAFED in the loop,
+  driven by guidance discretes and surface contact.
+
+```bash
+./build/sim/selene_sim --mode 3dof --telemetry approach.csv
+```
+
+Landing criteria for the 3-DOF verdict: vertical speed ≤ 2 m/s,
+horizontal speed ≤ 1 m/s, tilt ≤ 5° at contact.
+
 ## Next milestones
 
 - YAML loading of `config/landing_params.yaml` (values are currently
   compiled-in defaults that mirror the file).
-- 3-DOF planar dynamics with attitude and a pitch-over maneuver.
 - Sensor models (noisy altimeter/IMU) feeding a navigation filter instead
   of truth state.
 - Monte-Carlo dispersion runner with landing-footprint statistics.
+- Landing-site targeting (downrange position control) as a precursor to
+  hazard-relative divert.

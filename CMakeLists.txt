@@ -32,7 +32,9 @@ target_compile_options(lls_flight_options INTERFACE
 add_library(selene_fsw STATIC
     src/fdir/lls_assert.cpp
     src/fsw/mission_state_machine.cpp
-    src/gnc/control/pid_controller.cpp)
+    src/gnc/control/pid_controller.cpp
+    src/gnc/control/thrust_allocator.cpp
+    src/gnc/guidance/descent_guidance.cpp)
 
 target_include_directories(selene_fsw PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include

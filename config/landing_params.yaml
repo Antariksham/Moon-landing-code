@@ -24,12 +24,16 @@ vehicle:
     max_throttle_frac: 1.00
     specific_impulse_s: 310.0
 
+  attitude:
+    pitch_inertia_kgm2: 450.0      # Pitch-axis moment of inertia
+    max_rcs_torque_nm: 400.0       # RCS couple at command = +/-1
+
 control:
   loop_rate_hz: 50
   descent_rate_pid:                # See src/gnc/control/pid_controller.hpp
-    # The PID outputs a throttle CORRECTION around the mass-feedforward
-    # hover throttle (m*g / T_max); the engine model enforces the real
-    # [min_throttle, 1.0] band. See sim/src/descent_sim.cpp.
+    # 1-DOF sim only. The PID outputs a throttle CORRECTION around the
+    # mass-feedforward hover throttle (m*g / T_max); the engine model
+    # enforces the real [min_throttle, 1.0] band. See sim/src/descent_sim.cpp.
     kp: 0.8
     ki: 0.15
     kd: 0.05
@@ -40,9 +44,61 @@ control:
     integrator_min: -0.20
     integrator_max: 0.20
 
+  # 3-DOF approach loops (see sim/src/approach_sim.cpp). The velocity
+  # loops output thrust ACCELERATION commands (m/s^2) that the thrust
+  # allocator turns into pitch + throttle; the attitude loop outputs an
+  # RCS torque fraction in [-1, 1].
+  horizontal_velocity_pid:
+    kp: 0.40
+    ki: 0.02
+    kd: 0.0
+    # +/-2.0 m/s^2 keeps the commanded tilt inside the allocator's pitch
+    # authority at all vertical-channel commands.
+    output_min: -2.0
+    output_max: 2.0
+    integrator_min: -0.30
+    integrator_max: 0.30
+  vertical_velocity_pid:
+    # Correction around the gravity feedforward (1.625 m/s^2).
+    kp: 1.50
+    ki: 0.30
+    kd: 0.0
+    # +/-2.5 m/s^2 spans the engine's net-acceleration band around hover
+    # (max net accel is ~2.9 m/s^2 at full tanks).
+    output_min: -2.5
+    output_max: 2.5
+    integrator_min: -0.50
+    integrator_max: 0.50
+  attitude_pid:
+    # PD design: derivative-on-measurement provides pure rate damping;
+    # no integral term (nothing to trim in vacuum flight).
+    kp: 5.0
+    ki: 0.0
+    kd: 4.5
+    output_min: -1.0
+    output_max: 1.0
+    integrator_min: -0.10
+    integrator_max: 0.10
+  thrust_allocator:                # See src/gnc/control/thrust_allocator.hpp
+    max_pitch_deg: 45.0            # Attitude authority for translation loops
+
+approach:                          # 3-DOF handover gate (milestone 2)
+  gate_altitude_m: 2000.0
+  gate_horizontal_velocity_mps: 60.0
+  gate_vertical_velocity_mps: -30.0
+  gate_pitch_deg: -17.2            # Braking attitude (thrust against travel)
+  # Guidance pitch-over schedule (src/gnc/guidance/descent_guidance.hpp):
+  # allowed ground speed shrinks linearly with altitude and reaches zero
+  # at the pitch-over altitude, forcing a vertical terminal descent.
+  pitchover_altitude_m: 150.0
+  horizontal_rate_slope_hz: 0.03   # (m/s of ground speed) per m of altitude
+  max_horizontal_rate_mps: 80.0
+
 terminal_descent:
   target_descent_rate_mps: 1.0     # Constant-velocity final segment
   touchdown_velocity_limit_mps: 2.0
+  touchdown_horizontal_limit_mps: 1.0
+  touchdown_tilt_limit_deg: 5.0
   engine_cutoff_altitude_m: 0.5
 
 hazard_avoidance:

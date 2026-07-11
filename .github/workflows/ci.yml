@@ -23,8 +23,11 @@ jobs:
       - name: Run unit + closed-loop SIL tests
         run: ctest --test-dir build --output-on-failure
 
-      - name: Fly the nominal descent (exit code is the verdict)
+      - name: Fly the nominal 1-DOF terminal descent (exit code is the verdict)
         run: ./build/sim/selene_sim
+
+      - name: Fly the nominal 3-DOF approach + pitch-over (exit code is the verdict)
+        run: ./build/sim/selene_sim --mode 3dof
 
   format:
     name: clang-format check
