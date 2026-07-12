@@ -1,18 +1,23 @@
 /**
  * @file    approach_sim.hpp
  * @brief   Closed-loop 3-DOF approach + pitch-over + terminal-descent
- *          simulation (SIL milestone 2).
+ *          simulation (SIL milestones 2 + 3).
  *
  * @details Flies the full approach phase: the vehicle arrives at the
  *          handover gate with significant horizontal velocity in a braking
  *          attitude, pitches over to vertical as guidance ramps its allowed
  *          ground speed to zero, and completes the same terminal descent
- *          the milestone 1 sim flies — this time with attitude in the loop.
+ *          the milestone 1 sim flies — this time with attitude in the loop
+ *          and (milestone 3) the vertical channel flying on estimated
+ *          state instead of truth.
  *
  *          Flight code under test (all built under the strict flight
  *          flags):
+ *            - `lls::gnc::VerticalNavFilter` — altitude/velocity estimate
+ *              fused from the noisy IMU + radar-altimeter models.
  *            - `lls::gnc::DescentGuidance` — altitude-keyed velocity
- *              references and the pitch-over/terminal/cutoff discretes.
+ *              references and the pitch-over/terminal/cutoff discretes,
+ *              driven by the navigation altitude.
  *            - `lls::gnc::PidController` x3 — horizontal velocity,
  *              vertical velocity, and pitch attitude loops.
  *            - `lls::gnc::ThrustAllocator` — acceleration command to
@@ -21,17 +26,23 @@
  *              APPROACH -> TERMINAL_DESCENT -> TOUCHDOWN -> SAFED by the
  *              sim executive, exactly as the flight executive would.
  *
- *          Control architecture per 50 Hz cycle:
+ *          Per 50 Hz cycle:
  *
- *              guidance(h) -> (vx_cmd, vz_cmd, discretes)
+ *              IMU delta-v (previous step)  -> nav.Predict
+ *              altimeter return (10 Hz)     -> nav.UpdateAltitude
+ *              guidance(h_nav) -> (vx_cmd, vz_cmd, discretes)
  *              PID_x(vx_cmd, vx) -> ax_cmd      [thrust accel, m/s^2]
- *              PID_z(vz_cmd, vz) + g_ff -> az_cmd
+ *              PID_z(vz_cmd, vz_nav) + g_ff -> az_cmd
  *              allocator(ax_cmd, az_cmd, m) -> (pitch_cmd, throttle)
  *              PID_att(pitch_cmd, pitch) -> RCS torque fraction
  *
  *          The vertical loop's gravity feedforward carries the static
  *          load, so integrators only absorb modeling error — the same
- *          feedforward-plus-correction doctrine as milestone 1.
+ *          feedforward-plus-correction doctrine as milestone 1. The
+ *          horizontal and attitude channels still read truth state
+ *          (perfect navigation) until TRN/star-tracker milestones give
+ *          them sensors; the vehicle mass fed to the allocator is truth
+ *          (propellant bookkeeping is deterministic on the real vehicle).
  *
  * @copyright Copyright (c) 2026 Project SELENE Contributors.
  *            Licensed under the Apache License, Version 2.0.
@@ -45,11 +56,40 @@
 #include "fsw/mission_state_machine.hpp"
 #include "gnc/control/thrust_allocator.hpp"
 #include "gnc/guidance/descent_guidance.hpp"
+#include "gnc/navigation/vertical_nav_filter.hpp"
 #include "lander_dynamics_3dof.hpp"
 #include "lls/lls_types.hpp"
+#include "sensor_models.hpp"
 
 namespace lls {
 namespace sim {
+
+/**
+ * @brief Navigation configuration for the closed-loop run (milestone 3).
+ *
+ * By default the vertical channel flies on the flight
+ * `lls::gnc::VerticalNavFilter` fed by the noisy IMU/altimeter models:
+ * guidance altitude, the vertical-rate loop's measurement, and the
+ * engine-cutoff discrete all use estimated state. The horizontal and
+ * attitude channels still read truth (perfect navigation) until the TRN
+ * and star-tracker milestones give them sensors of their own.
+ */
+struct NavScenarioParams {
+    bool use_perfect_navigation = false; /**< True: bypass sensors + filter
+                                              and fly on truth (milestone 2
+                                              behavior, for A/B runs).     */
+
+    /** Flight filter tuning. The `initial_altitude_m` /
+     *  `initial_velocity_mps` fields are overwritten by the sim: the
+     *  filter is seeded from the gate state plus the offsets below.      */
+    gnc::VerticalNavFilterConfig filter{};
+
+    F64 initial_altitude_error_m = 5.0;   /**< Seed error vs. gate truth.   */
+    F64 initial_velocity_error_mps = 1.0; /**< Seed error vs. gate truth.  */
+
+    ImuModelParams imu{};             /**< Accelerometer error model.      */
+    AltimeterModelParams altimeter{}; /**< Radar-altimeter error model.    */
+};
 
 /** @brief Scenario configuration (defaults mirror config/landing_params.yaml).
  */
@@ -61,6 +101,7 @@ struct ApproachScenarioParams {
     gnc::ThrustAllocatorConfig allocator{}; /**< Control allocation limits.
                                                  `max_thrust_n` must match
                                                  the truth vehicle.        */
+    NavScenarioParams nav{};                /**< Sensors + flight filter.   */
 
     F64 control_rate_hz = 50.0;     /**< Flight control loop rate.        */
     F64 max_sim_duration_s = 600.0; /**< Hard bound on the sim loop.      */
@@ -80,6 +121,8 @@ struct ApproachTelemetrySample {
     F64 throttle_frac = 0.0;
     F64 torque_frac = 0.0;
     F64 mass_kg = 0.0;
+    F64 nav_altitude_m = 0.0;     /**< Filter estimate in the loop.       */
+    F64 nav_velocity_z_mps = 0.0; /**< Filter estimate in the loop.       */
     U8 mission_phase = 0U; /**< `MissionPhase` value, telemetry encoding. */
 };
 
@@ -96,6 +139,16 @@ struct ApproachSimResult {
     fsw::MissionPhase final_phase =
         fsw::MissionPhase::kBoot; /**< Executive phase at sim end.         */
     U32 rejected_transition_count = 0U; /**< State-machine rejections.     */
+
+    U32 nav_rejected_measurement_count = 0U;    /**< Altimeter returns the
+                                                     filter's innovation gate
+                                                     refused.                 */
+    F64 touchdown_nav_altitude_error_m = 0.0;   /**< |estimate - truth| at
+                                                     sim end (0 when flying
+                                                     perfect navigation).  */
+    F64 touchdown_nav_velocity_error_mps = 0.0; /**< |estimate - truth| at
+                                                     sim end (0 when flying
+                                                     perfect navigation).  */
 };
 
 /** @brief Fixed-capacity telemetry recorder (rule #1: no heap, even here). */

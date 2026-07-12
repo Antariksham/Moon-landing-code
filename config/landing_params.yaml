@@ -82,6 +82,25 @@ control:
   thrust_allocator:                # See src/gnc/control/thrust_allocator.hpp
     max_pitch_deg: 45.0            # Attitude authority for translation loops
 
+navigation:                        # Vertical channel (milestone 3)
+  vertical_nav_filter:             # src/gnc/navigation/vertical_nav_filter.hpp
+    # 2-state Kalman filter: IMU-acceleration predict at the control
+    # rate, radar-altimeter update at the sensor rate. The initial state
+    # is seeded from the approach gate plus the handover errors below.
+    initial_altitude_std_m: 10.0
+    initial_velocity_std_mps: 2.0
+    accel_noise_std_mps2: 0.1      # Process noise driver
+    altimeter_noise_std_m: 0.2     # Measurement noise (R)
+    innovation_gate_sigma: 5.0     # Reject returns beyond this many sigma
+  handover_error:                  # Filter seed error vs. truth at the gate
+    altitude_m: 5.0
+    velocity_mps: 1.0
+  sensors:                         # SIL error models (sim/src/sensor_models.hpp)
+    imu_accel_noise_std_mps2: 0.05 # White noise per 50 Hz sample
+    imu_accel_bias_mps2: 0.02      # Constant turn-on bias (unestimated)
+    altimeter_noise_std_m: 0.2     # White noise per return
+    altimeter_rate_hz: 10          # Return every 5th control cycle
+
 approach:                          # 3-DOF handover gate (milestone 2)
   gate_altitude_m: 2000.0
   gate_horizontal_velocity_mps: 60.0

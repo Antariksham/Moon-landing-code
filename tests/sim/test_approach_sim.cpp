@@ -171,6 +171,8 @@ TEST(LanderDynamics3Dof, TouchdownFreezesTheState) {
 /* ------------------------------------------------------------------ */
 
 TEST(ApproachSimClosedLoop, NominalGateLandsSafelyAndReachesSafed) {
+    /* Default scenario = milestone 3: the vertical channel flies on the
+     * flight nav filter fed by noisy sensors, not on truth.              */
     const ApproachScenarioParams params{};
     ApproachSimResult result{};
     ASSERT_EQ(RunApproachSim(params, &result, nullptr), Status::kSuccess);
@@ -222,6 +224,63 @@ TEST(ApproachSimClosedLoop, FliesThePitchOverManeuver) {
               static_cast<U8>(fsw::MissionPhase::kApproach));
     EXPECT_EQ(log.GetSample(log.GetCount() - 1U).mission_phase,
               static_cast<U8>(fsw::MissionPhase::kTerminalDescent));
+}
+
+/* ------------------------------------------------------------------ */
+/* Navigation in the loop (milestone 3)                                */
+/* ------------------------------------------------------------------ */
+
+TEST(ApproachSimNavigation, EstimatorConvergesAndTracksThroughTouchdown) {
+    const ApproachScenarioParams params{};
+    ApproachSimResult result{};
+    static ApproachTelemetryLog log; /* ~3 MB: static, not stack. */
+    ASSERT_EQ(RunApproachSim(params, &result, &log), Status::kSuccess);
+    ASSERT_TRUE(result.touched_down);
+    ASSERT_GT(log.GetCount(), 100U);
+
+    /* The filter is seeded 5 m / 1 m/s off truth; after the first second
+     * (50 cycles, >= 10 altimeter fixes) it must have converged, and it
+     * must stay converged all the way down.                              */
+    for (U32 i = 50U; i < log.GetCount(); ++i) { /* Bounded loop. */
+        const ApproachTelemetrySample& s = log.GetSample(i);
+        EXPECT_LT(std::fabs(s.nav_altitude_m - s.altitude_m), 1.0)
+            << "Altitude estimate diverged at t=" << s.time_s;
+        EXPECT_LT(std::fabs(s.nav_velocity_z_mps - s.velocity_z_mps), 0.5)
+            << "Velocity estimate diverged at t=" << s.time_s;
+    }
+
+    /* Touchdown-time estimate quality (what the cutoff decision used).   */
+    EXPECT_LT(result.touchdown_nav_altitude_error_m, 0.5);
+    EXPECT_LT(result.touchdown_nav_velocity_error_mps, 0.3);
+
+    /* Clean sensors this run: the innovation gate should stay quiet.     */
+    EXPECT_EQ(result.nav_rejected_measurement_count, 0U);
+}
+
+TEST(ApproachSimNavigation, PerfectNavigationBaselineStillFlies) {
+    /* Milestone 2 regression: bypassing sensors + filter must still land
+     * safely and must report zero navigation error by definition.        */
+    ApproachScenarioParams params{};
+    params.nav.use_perfect_navigation = true;
+
+    ApproachSimResult result{};
+    ASSERT_EQ(RunApproachSim(params, &result, nullptr), Status::kSuccess);
+    EXPECT_TRUE(result.touched_down);
+    EXPECT_LE(result.touchdown_vertical_speed_mps, kVerticalLimitMps);
+    EXPECT_LE(result.touchdown_horizontal_speed_mps, kHorizontalLimitMps);
+    EXPECT_LE(result.touchdown_tilt_rad, kTiltLimitRad);
+    EXPECT_EQ(result.controller_fault_count, 0U);
+    EXPECT_DOUBLE_EQ(result.touchdown_nav_altitude_error_m, 0.0);
+    EXPECT_DOUBLE_EQ(result.touchdown_nav_velocity_error_mps, 0.0);
+    EXPECT_EQ(result.nav_rejected_measurement_count, 0U);
+}
+
+TEST(ApproachSimNavigation, RejectsBadSensorConfiguration) {
+    ApproachScenarioParams params{};
+    params.nav.altimeter.update_divisor = 0U; /* Model will refuse.       */
+    ApproachSimResult result{};
+    EXPECT_EQ(RunApproachSim(params, &result, nullptr),
+              Status::kErrInvalidParam);
 }
 
 TEST(ApproachSimClosedLoop, SurvivesDispersedGateConditions) {

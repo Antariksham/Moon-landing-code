@@ -7,6 +7,7 @@
 add_library(selene_sim_core STATIC
     src/lander_dynamics.cpp
     src/lander_dynamics_3dof.cpp
+    src/sensor_models.cpp
     src/descent_sim.cpp
     src/approach_sim.cpp)
 

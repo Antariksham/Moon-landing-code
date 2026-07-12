@@ -60,6 +60,7 @@ lls::sim::ApproachTelemetryLog g_telemetry_3dof;
 /** Parsed command line. */
 struct CliOptions {
     bool mode_3dof = false;
+    bool perfect_nav = false;
     bool altitude_set = false;
     bool velocity_set = false;
     bool horizontal_set = false;
@@ -73,7 +74,7 @@ void PrintUsage(const char* prog) {
     std::fprintf(stderr,
                  "Usage: %s [--mode 1dof|3dof] [--initial-altitude-m <v>] "
                  "[--initial-velocity-mps <v>] [--initial-horizontal-mps <v>] "
-                 "[--telemetry <out.csv>]\n",
+                 "[--perfect-nav] [--telemetry <out.csv>]\n",
                  prog);
 }
 
@@ -103,6 +104,8 @@ void PrintUsage(const char* prog) {
             opts->initial_horizontal_mps = std::atof(argv[i + 1]);
             opts->horizontal_set = true;
             ++i;
+        } else if (std::strcmp(argv[i], "--perfect-nav") == 0) {
+            opts->perfect_nav = true;
         } else if ((std::strcmp(argv[i], "--telemetry") == 0) && has_value) {
             opts->telemetry_path = argv[i + 1];
             ++i;
@@ -142,16 +145,18 @@ void PrintUsage(const char* prog) {
                  "time_s,downrange_m,altitude_m,velocity_x_mps,"
                  "velocity_z_mps,velocity_x_cmd_mps,velocity_z_cmd_mps,"
                  "pitch_rad,pitch_cmd_rad,throttle_frac,torque_frac,"
-                 "mass_kg,mission_phase\n");
+                 "mass_kg,nav_altitude_m,nav_velocity_z_mps,"
+                 "mission_phase\n");
     for (lls::U32 i = 0U; i < log.GetCount(); ++i) { /* Bounded loop. */
         const lls::sim::ApproachTelemetrySample& s = log.GetSample(i);
         std::fprintf(file,
                      "%.3f,%.2f,%.3f,%.4f,%.4f,%.4f,%.4f,%.5f,%.5f,%.4f,"
-                     "%.4f,%.3f,%u\n",
+                     "%.4f,%.3f,%.3f,%.4f,%u\n",
                      s.time_s, s.downrange_m, s.altitude_m, s.velocity_x_mps,
                      s.velocity_z_mps, s.velocity_x_cmd_mps,
                      s.velocity_z_cmd_mps, s.pitch_rad, s.pitch_cmd_rad,
                      s.throttle_frac, s.torque_frac, s.mass_kg,
+                     s.nav_altitude_m, s.nav_velocity_z_mps,
                      static_cast<unsigned>(s.mission_phase));
     }
     static_cast<void>(std::fclose(file));
@@ -215,6 +220,7 @@ void PrintUsage(const char* prog) {
     if (opts.horizontal_set) {
         params.gate.velocity_x_mps = opts.initial_horizontal_mps;
     }
+    params.nav.use_perfect_navigation = opts.perfect_nav;
 
     lls::sim::ApproachSimResult result{};
     const lls::Status status =
@@ -261,6 +267,16 @@ void PrintUsage(const char* prog) {
     std::printf("Final phase:       %u (rejected transitions: %u)\n",
                 static_cast<unsigned>(result.final_phase),
                 static_cast<unsigned>(result.rejected_transition_count));
+    if (opts.perfect_nav) {
+        std::printf("Navigation:        perfect (sensors bypassed)\n");
+    } else {
+        std::printf(
+            "Navigation:        filter in the loop; touchdown estimate "
+            "error %.2f m / %.2f m/s, %u gated returns\n",
+            result.touchdown_nav_altitude_error_m,
+            result.touchdown_nav_velocity_error_mps,
+            static_cast<unsigned>(result.nav_rejected_measurement_count));
+    }
     std::printf("Verdict:           %s\n",
                 safe ? "SAFE LANDING" : "LOSS OF VEHICLE");
 
