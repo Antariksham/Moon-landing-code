@@ -129,6 +129,7 @@ TEST(MonteCarloDegenerate, ZeroSigmasReproduceTheSingleNominalRun) {
     MonteCarloParams params{};
     params.run_count = 10U;
     params.sigmas = MakeZeroSigmas();
+    params.hazards.hazard_probability = 0.0; /* No terrain dispersion.    */
     params.nominal.nav.use_perfect_navigation = true;
 
     MonteCarloSummary summary{};
@@ -233,6 +234,13 @@ TEST(MonteCarloAcceptance, DefaultDispersionsAllLandSafely) {
     EXPECT_LT(summary.nav_altitude_error_m.max, 0.5);
     EXPECT_LT(summary.miss_m.max, 10.0)
         << "Site targeting degraded: worst miss " << summary.miss_m.max;
+
+    /* Hazard dispersion must actually exercise the divert machinery, and
+     * no run may ever settle onto hazardous terrain.                     */
+    EXPECT_GT(summary.hazard_zone_count, 0U);
+    EXPECT_GT(summary.divert_count, 0U) << "HDA was never exercised";
+    EXPECT_EQ(summary.hazard_landing_count, 0U);
+    EXPECT_EQ(summary.no_safe_site_count, 0U);
 }
 
 }  // namespace

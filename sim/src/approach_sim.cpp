@@ -159,6 +159,7 @@ struct FlightStack {
     gnc::PidController vertical_pid;
     gnc::PidController attitude_pid;
     gnc::ThrustAllocator allocator;
+    hda::SafeSiteSelector site_selector;
     fsw::MissionStateMachine executive;
 
     [[nodiscard]] bool Init(const ApproachScenarioParams& params) noexcept {
@@ -169,9 +170,60 @@ struct FlightStack {
                IsSuccess(vertical_pid.Init(MakeVerticalVelocityPidConfig())) &&
                IsSuccess(attitude_pid.Init(MakeAttitudePidConfig())) &&
                IsSuccess(allocator.Init(params.allocator)) &&
+               IsSuccess(site_selector.Init(params.hda.selector)) &&
                SequenceToApproach(executive);
     }
 };
+
+/**
+ * @brief   Whether the HDA scenario parameters are self-consistent.
+ * @param   hda  Candidate parameters (checked even when disabled: a bad
+ *               configuration is a scenario bug either way).
+ * @return  `true` when the gate/spacing values are usable and the survey
+ *          fits the flight selector's fixed capacity.
+ */
+[[nodiscard]] bool AreHdaParamsValid(const HdaScenarioParams& hda) noexcept {
+    if (!std::isfinite(hda.scan_altitude_m) || (hda.scan_altitude_m <= 0.0) ||
+        !std::isfinite(hda.survey_halfwidth_m) ||
+        (hda.survey_halfwidth_m <= 0.0) ||
+        !std::isfinite(hda.sample_spacing_m) || (hda.sample_spacing_m <= 0.0)) {
+        return false;
+    }
+    const F64 stations_per_side = hda.survey_halfwidth_m / hda.sample_spacing_m;
+    const F64 station_count = (2.0 * stations_per_side) + 1.0;
+    return station_count <= static_cast<F64>(hda::SiteSurvey::kMaxSiteSamples);
+}
+
+/**
+ * @brief   Survey the terrain around the target (mapper stand-in).
+ *
+ * @details Perfect terrain sensing: stations read the truth model
+ *          directly. LIDAR range/registration noise is a follow-up.
+ *
+ * @param   terrain      Truth terrain.
+ * @param   hda          Survey geometry.
+ * @param   center_m     Survey center (the current target).
+ * @return  Survey ready for the flight selector.
+ */
+[[nodiscard]] hda::SiteSurvey SurveyTerrain(const TerrainModel& terrain,
+                                            const HdaScenarioParams& hda,
+                                            const F64 center_m) noexcept {
+    hda::SiteSurvey survey{};
+    for (F64 offset_m = -hda.survey_halfwidth_m;
+         offset_m <= hda.survey_halfwidth_m;
+         offset_m += hda.sample_spacing_m) { /* Bounded by validation. */
+        if (survey.count >= hda::SiteSurvey::kMaxSiteSamples) {
+            break;
+        }
+        const F64 station_m = center_m + offset_m;
+        hda::SiteSample& sample = survey.samples[survey.count];
+        sample.downrange_m = static_cast<F32>(station_m);
+        sample.slope_deg = static_cast<F32>(terrain.GetSlopeDeg(station_m));
+        sample.roughness_m = static_cast<F32>(terrain.GetRoughnessM(station_m));
+        ++survey.count;
+    }
+    return survey;
+}
 
 /** @brief Actuator commands produced by one control cycle. */
 struct CycleCommands {
@@ -313,9 +365,24 @@ Status RunApproachSim(const ApproachScenarioParams& params,
         return Status::kErrInvalidParam;
     }
 
+    if (!AreHdaParamsValid(params.hda) ||
+        (params.hazard_zone_count > TerrainModel::kMaxHazardZones)) {
+        return Status::kErrInvalidParam;
+    }
+
     LanderDynamics3Dof dynamics;
     if (!IsSuccess(dynamics.Init(params.vehicle, params.gate))) {
         return Status::kErrInvalidParam;
+    }
+
+    TerrainModel terrain;
+    if (!IsSuccess(terrain.Init(params.terrain))) {
+        return Status::kErrInvalidParam;
+    }
+    for (U32 i = 0U; i < params.hazard_zone_count; ++i) { /* Bounded loop. */
+        if (!IsSuccess(terrain.AddHazardZone(params.hazard_zones[i]))) {
+            return Status::kErrInvalidParam;
+        }
     }
 
     FlightStack stack;
@@ -342,6 +409,8 @@ Status RunApproachSim(const ApproachScenarioParams& params,
 
     F64 time_s = 0.0;
     F64 prev_velocity_z_mps = params.gate.velocity_z_mps;
+    F64 active_target_m = params.target_downrange_m;
+    bool hda_scan_done = false;
     gnc::GuidanceCommand gcmd{};
     CycleCommands cmds{};
 
@@ -386,8 +455,35 @@ Status RunApproachSim(const ApproachScenarioParams& params,
         }
         prev_velocity_z_mps = truth.velocity_z_mps;
 
-        const F64 downrange_to_go_m =
-            params.target_downrange_m - truth.downrange_m;
+        /* --- HDA decision gate (one-shot, during APPROACH). ------------ */
+        if (params.hda.enabled && !hda_scan_done &&
+            (stack.executive.GetPhase() == fsw::MissionPhase::kApproach) &&
+            (nav_altitude_m <= params.hda.scan_altitude_m)) {
+            hda_scan_done = true;
+            const hda::SiteSurvey survey =
+                SurveyTerrain(terrain, params.hda, active_target_m);
+            hda::SiteSelection selection{};
+            const Status hda_status = stack.site_selector.SelectSite(
+                survey, static_cast<F32>(active_target_m), &selection);
+            if (IsSuccess(hda_status)) {
+                if (selection.diverted) {
+                    result_out->hda_diverted = true;
+                    result_out->hda_divert_distance_m = std::fabs(
+                        static_cast<F64>(selection.target_downrange_m) -
+                        active_target_m);
+                    active_target_m =
+                        static_cast<F64>(selection.target_downrange_m);
+                }
+            } else if (hda_status == Status::kErrNoSafeSite) {
+                /* Mission event, not a code fault: hold the nominal site
+                 * and let the landing be judged for what it is.          */
+                result_out->hda_no_safe_site = true;
+            } else {
+                ++result_out->controller_fault_count;
+            }
+        }
+
+        const F64 downrange_to_go_m = active_target_m - truth.downrange_m;
         cmds = RunControlCycle(stack, truth, nav_altitude_m, nav_velocity_z_mps,
                                downrange_to_go_m, dt_s, gcmd, cmds,
                                result_out->controller_fault_count);
@@ -442,7 +538,13 @@ Status RunApproachSim(const ApproachScenarioParams& params,
     result_out->touchdown_tilt_rad = std::fabs(final_state.pitch_rad);
     result_out->touchdown_downrange_m = final_state.downrange_m;
     result_out->touchdown_miss_m =
-        std::fabs(params.target_downrange_m - final_state.downrange_m);
+        std::fabs(active_target_m - final_state.downrange_m);
+    result_out->final_target_downrange_m = active_target_m;
+    result_out->landed_on_hazard =
+        (terrain.GetSlopeDeg(final_state.downrange_m) >
+         static_cast<F64>(params.hda.selector.max_slope_deg)) ||
+        (terrain.GetRoughnessM(final_state.downrange_m) >
+         static_cast<F64>(params.hda.selector.max_roughness_m));
     result_out->flight_time_s = time_s;
     result_out->propellant_used_kg =
         initial_propellant_kg - dynamics.GetPropellantRemainingKg();

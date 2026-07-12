@@ -35,7 +35,8 @@ add_library(selene_fsw STATIC
     src/gnc/control/pid_controller.cpp
     src/gnc/control/thrust_allocator.cpp
     src/gnc/guidance/descent_guidance.cpp
-    src/gnc/navigation/vertical_nav_filter.cpp)
+    src/gnc/navigation/vertical_nav_filter.cpp
+    src/hda/safe_site_selector.cpp)
 
 target_include_directories(selene_fsw PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include

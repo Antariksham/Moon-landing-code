@@ -124,11 +124,33 @@ with worst-case miss 2.5 m — the footprint collapsed from σ ≈ 212 m
 raised to 60° and the horizontal-acceleration clamp to ±2.5 m/s², sized so
 a +3σ hot gate (75 m/s) can still stop at the site.
 
+## Milestone 6 (implemented): hazard-relative divert
+
+The approach now carries a Hazard Detection & Avoidance decision: at the
+1000 m gate the terrain mapper stand-in surveys ±300 m around the target
+(4 m stations, perfect sensing for now) and the flight
+`lls::hda::SafeSiteSelector` verdicts the site — keep it, divert to the
+closest safe site within the 300 m envelope, or report no-safe-site and
+hold nominal under fault protection. Guidance re-targets on the spot;
+the terrain model (`src/terrain_model.hpp`) layers hazard zones over a
+benign base surface, and touchdown terrain safety joins the landing
+criteria.
+
+```bash
+./build/sim/selene_sim --mode 3dof --hazard-at-target   # forces a divert
+```
+
+Demo: an 80 m boulder field on the nominal site produces a 48 m divert
+and a 0.10 m miss on the new site. The Monte-Carlo campaign places
+hazard zones randomly near the site in half its runs: in the 500-run
+reference campaign, 237 runs drew a hazard, 155 required a divert, and
+**zero** runs touched down on hazardous terrain — all 500 safe.
+
 ## Next milestones
 
 - YAML loading of `config/landing_params.yaml` (values are currently
   compiled-in defaults that mirror the file).
-- Hazard-relative divert: re-target mid-descent to an HDA-selected safe
-  site (the site-targeting law already accepts any reachable target).
+- LIDAR sensor model + terrain estimation (HDA currently surveys truth
+  terrain), and 2-D site maps.
 - Accelerometer bias state in the navigation filter; TRN for the
   horizontal channel.

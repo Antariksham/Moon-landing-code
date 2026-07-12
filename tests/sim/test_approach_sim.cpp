@@ -305,6 +305,96 @@ TEST(ApproachSimNavigation, RejectsBadSensorConfiguration) {
               Status::kErrInvalidParam);
 }
 
+/* ------------------------------------------------------------------ */
+/* Hazard-relative divert (milestone 6)                                */
+/* ------------------------------------------------------------------ */
+
+TEST(ApproachSimHda, BenignTerrainVerifiesNominalAndDoesNotDivert) {
+    const ApproachScenarioParams params{};
+    ApproachSimResult result{};
+    ASSERT_EQ(RunApproachSim(params, &result, nullptr), Status::kSuccess);
+    EXPECT_FALSE(result.hda_diverted);
+    EXPECT_FALSE(result.hda_no_safe_site);
+    EXPECT_FALSE(result.landed_on_hazard);
+    EXPECT_DOUBLE_EQ(result.final_target_downrange_m,
+                     params.target_downrange_m);
+}
+
+TEST(ApproachSimHda, DivertsAroundAHazardOnTheNominalSite) {
+    ApproachScenarioParams params{};
+    HazardZone zone{};
+    zone.start_m = params.target_downrange_m - 40.0;
+    zone.end_m = params.target_downrange_m + 40.0;
+    params.hazard_zones[0] = zone;
+    params.hazard_zone_count = 1U;
+
+    ApproachSimResult result{};
+    ASSERT_EQ(RunApproachSim(params, &result, nullptr), Status::kSuccess);
+
+    EXPECT_TRUE(result.hda_diverted) << "HDA never diverted off the hazard";
+    EXPECT_GT(result.hda_divert_distance_m, 40.0);
+    EXPECT_LT(result.hda_divert_distance_m, 100.0);
+    EXPECT_FALSE(result.landed_on_hazard);
+    EXPECT_TRUE(result.touched_down);
+    EXPECT_LE(result.touchdown_vertical_speed_mps, kVerticalLimitMps);
+    EXPECT_LE(result.touchdown_horizontal_speed_mps, kHorizontalLimitMps);
+    EXPECT_LT(result.touchdown_miss_m, 5.0)
+        << "Missed the DIVERTED site by " << result.touchdown_miss_m;
+    EXPECT_EQ(result.controller_fault_count, 0U);
+    EXPECT_EQ(result.final_phase, fsw::MissionPhase::kSafed);
+}
+
+TEST(ApproachSimHda, ReportsNoSafeSiteAndHoldsNominal) {
+    ApproachScenarioParams params{};
+    /* Hazard blankets the entire divert envelope.                        */
+    HazardZone zone{};
+    zone.start_m = params.target_downrange_m - 400.0;
+    zone.end_m = params.target_downrange_m + 400.0;
+    params.hazard_zones[0] = zone;
+    params.hazard_zone_count = 1U;
+
+    ApproachSimResult result{};
+    ASSERT_EQ(RunApproachSim(params, &result, nullptr), Status::kSuccess);
+
+    EXPECT_TRUE(result.hda_no_safe_site);
+    EXPECT_FALSE(result.hda_diverted);
+    EXPECT_DOUBLE_EQ(result.final_target_downrange_m,
+                     params.target_downrange_m);
+    EXPECT_TRUE(result.landed_on_hazard)
+        << "Result must report the hazardous touchdown honestly";
+    EXPECT_EQ(result.controller_fault_count, 0U)
+        << "No-safe-site is a mission event, not a code fault";
+}
+
+TEST(ApproachSimHda, DisabledHdaFliesBlindOntoTheHazard) {
+    ApproachScenarioParams params{};
+    params.hda.enabled = false;
+    HazardZone zone{};
+    zone.start_m = params.target_downrange_m - 40.0;
+    zone.end_m = params.target_downrange_m + 40.0;
+    params.hazard_zones[0] = zone;
+    params.hazard_zone_count = 1U;
+
+    ApproachSimResult result{};
+    ASSERT_EQ(RunApproachSim(params, &result, nullptr), Status::kSuccess);
+    EXPECT_FALSE(result.hda_diverted);
+    EXPECT_TRUE(result.landed_on_hazard);
+}
+
+TEST(ApproachSimHda, RejectsInconsistentSurveyGeometry) {
+    ApproachScenarioParams params{};
+    params.hda.sample_spacing_m = 0.0;
+    ApproachSimResult result{};
+    EXPECT_EQ(RunApproachSim(params, &result, nullptr),
+              Status::kErrInvalidParam);
+
+    params = ApproachScenarioParams{};
+    /* Survey too dense for the selector's fixed capacity.                */
+    params.hda.sample_spacing_m = 1.0;
+    EXPECT_EQ(RunApproachSim(params, &result, nullptr),
+              Status::kErrInvalidParam);
+}
+
 TEST(ApproachSimClosedLoop, SurvivesDispersedGateConditions) {
     /* Corner cases of the approach handover envelope. Every combination
      * must land safely (speeds, tilt); landing ACCURACY is only judged

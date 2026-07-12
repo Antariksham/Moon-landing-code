@@ -56,12 +56,12 @@ class GaussianNoiseGenerator {
     /** @brief Next standard-normal deviate (mean 0, sigma 1). */
     [[nodiscard]] F64 NextGaussian() noexcept;
 
+    /** @brief Next uniform deviate in (0, 1] (Bernoulli draws etc.). */
+    [[nodiscard]] F64 NextUniform() noexcept;
+
  private:
     /** @brief Next raw xorshift64* draw. */
     [[nodiscard]] U64 NextU64() noexcept;
-
-    /** @brief Next uniform deviate in (0, 1]. */
-    [[nodiscard]] F64 NextUniform() noexcept;
 
     U64 state_ = 0x9E3779B97F4A7C15ULL; /**< Non-zero default seed.        */
     F64 spare_ = 0.0;        /**< Second Box-Muller deviate, held.         */

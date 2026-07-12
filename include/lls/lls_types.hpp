@@ -66,6 +66,8 @@ enum class Status : U8 {
     kErrSaturated = 5U, /**< Output limited; result is safe but clipped.*/
     kErrMeasurementRejected = 6U, /**< Estimator innovation gate rejected a
                                        sensor measurement; state untouched.*/
+    kErrNoSafeSite = 7U, /**< HDA found no acceptable landing site within
+                              the divert envelope; target unchanged.       */
 };
 
 /**

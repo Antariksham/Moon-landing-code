@@ -18,6 +18,7 @@ add_executable(selene_unit_tests
     gnc/test_descent_guidance.cpp
     gnc/test_thrust_allocator.cpp
     gnc/test_vertical_nav_filter.cpp
+    hda/test_safe_site_selector.cpp
     fsw/test_mission_state_machine.cpp)
 
 target_link_libraries(selene_unit_tests PRIVATE
@@ -30,6 +31,7 @@ if(TARGET selene_sim_core)
         sim/test_descent_sim.cpp
         sim/test_approach_sim.cpp
         sim/test_sensor_models.cpp
+        sim/test_terrain_model.cpp
         sim/test_monte_carlo.cpp)
     target_link_libraries(selene_unit_tests PRIVATE selene_sim_core)
 endif()

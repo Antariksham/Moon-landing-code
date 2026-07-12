@@ -149,9 +149,26 @@ monte_carlo:                       # Dispersion campaign (milestone 4)
     imu_accel_bias_mps2: 0.01      # Around the nominal 0.02 bias
     nav_handover_altitude_m: 5.0   # Filter seed error, zero-centered
     nav_handover_velocity_mps: 1.0 # Filter seed error, zero-centered
+  hazards:                         # Terrain-hazard dispersion (milestone 6)
+    hazard_probability: 0.5        # Fraction of runs with a zone near the site
+    zone_length_m: 60.0
+    center_offset_sigma_m: 40.0    # Zone placement around the nominal site
 
-hazard_avoidance:
+hazard_avoidance:                  # Milestone 6 (src/hda/safe_site_selector.hpp)
+  # Mission limits the flight selector enforces per candidate site; a
+  # site's whole footprint (min_safe_site_radius_m) must be surveyed and
+  # uniformly inside the limits.
   max_site_slope_deg: 10.0
   max_roughness_m: 0.30
   min_safe_site_radius_m: 4.0
   max_divert_distance_m: 300.0
+  # SIL survey geometry (sim/src/approach_sim.hpp): a one-shot terrain
+  # scan at the decision gate; station spacing must not exceed the
+  # footprint radius or no site can prove its neighborhood surveyed.
+  scan_altitude_m: 1000.0
+  survey_halfwidth_m: 300.0
+  sample_spacing_m: 4.0
+  # SIL base terrain (sim/src/terrain_model.hpp); hazard zones are laid
+  # on top per scenario (and randomly by the Monte-Carlo campaign).
+  base_slope_deg: 2.0
+  base_roughness_m: 0.05

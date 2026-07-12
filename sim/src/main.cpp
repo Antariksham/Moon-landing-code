@@ -80,6 +80,7 @@ enum class SimMode : lls::U8 {
 struct CliOptions {
     SimMode mode = SimMode::k1Dof;
     bool perfect_nav = false;
+    bool hazard_at_target = false;
     bool altitude_set = false;
     bool velocity_set = false;
     bool horizontal_set = false;
@@ -97,8 +98,9 @@ void PrintUsage(const char* prog) {
     std::fprintf(stderr,
                  "Usage: %s [--mode 1dof|3dof|mc] [--initial-altitude-m <v>] "
                  "[--initial-velocity-mps <v>] [--initial-horizontal-mps <v>] "
-                 "[--target-downrange-m <v>] [--perfect-nav] [--runs <n>] "
-                 "[--seed <n>] [--telemetry <out.csv>]\n",
+                 "[--target-downrange-m <v>] [--perfect-nav] "
+                 "[--hazard-at-target] [--runs <n>] [--seed <n>] "
+                 "[--telemetry <out.csv>]\n",
                  prog);
 }
 
@@ -146,6 +148,8 @@ void PrintUsage(const char* prog) {
             opts->target_downrange_m = std::atof(argv[i + 1]);
             opts->target_set = true;
             ++i;
+        } else if (std::strcmp(argv[i], "--hazard-at-target") == 0) {
+            opts->hazard_at_target = true;
         } else if (std::strcmp(argv[i], "--perfect-nav") == 0) {
             opts->perfect_nav = true;
         } else if ((std::strcmp(argv[i], "--telemetry") == 0) && has_value) {
@@ -266,6 +270,14 @@ void PrintUsage(const char* prog) {
         params.target_downrange_m = opts.target_downrange_m;
     }
     params.nav.use_perfect_navigation = opts.perfect_nav;
+    if (opts.hazard_at_target) {
+        /* Demo scenario: a boulder field squarely on the nominal site.   */
+        lls::sim::HazardZone zone{};
+        zone.start_m = params.target_downrange_m - 40.0;
+        zone.end_m = params.target_downrange_m + 40.0;
+        params.hazard_zones[0] = zone;
+        params.hazard_zone_count = 1U;
+    }
 
     lls::sim::ApproachSimResult result{};
     const lls::Status status =
@@ -290,7 +302,8 @@ void PrintUsage(const char* prog) {
         (result.touchdown_horizontal_speed_mps <=
          kTouchdownHorizontalLimitMps) &&
         (tilt_deg <= kTouchdownTiltLimitDeg) &&
-        (result.touchdown_miss_m <= kTouchdownMissLimitM);
+        (result.touchdown_miss_m <= kTouchdownMissLimitM) &&
+        !result.landed_on_hazard;
 
     std::printf("=== SELENE 3-DOF approach report ===\n");
     std::printf("Gate:              %.1f m, vx %.1f m/s, vz %.1f m/s\n",
@@ -307,8 +320,24 @@ void PrintUsage(const char* prog) {
     std::printf("Tilt at contact:   %.2f deg (limit %.1f)\n", tilt_deg,
                 kTouchdownTiltLimitDeg);
     std::printf("Landing miss:      %.2f m (target %.0f m, limit %.0f)\n",
-                result.touchdown_miss_m, params.target_downrange_m,
+                result.touchdown_miss_m, result.final_target_downrange_m,
                 kTouchdownMissLimitM);
+    if (result.hda_diverted) {
+        std::printf(
+            "HDA:               DIVERTED %.0f m (nominal %.0f m -> "
+            "%.0f m)\n",
+            result.hda_divert_distance_m, params.target_downrange_m,
+            result.final_target_downrange_m);
+    } else if (result.hda_no_safe_site) {
+        std::printf(
+            "HDA:               NO SAFE SITE in the divert envelope "
+            "— held nominal\n");
+    } else {
+        std::printf("HDA:               nominal site verified safe\n");
+    }
+    if (result.landed_on_hazard) {
+        std::printf("HDA:               LANDED ON HAZARDOUS TERRAIN\n");
+    }
     std::printf("Flight time:       %.1f s\n", result.flight_time_s);
     std::printf("Propellant used:   %.1f kg\n", result.propellant_used_kg);
     std::printf("Controller faults: %u\n",
@@ -431,6 +460,13 @@ void PrintMetric(const char* label, const lls::sim::MetricStats& stats,
     std::printf("Controller faults: %u total; gated altimeter returns: %u\n",
                 static_cast<unsigned>(summary.total_controller_faults),
                 static_cast<unsigned>(summary.total_nav_rejected_measurements));
+    std::printf(
+        "HDA:               %u hazard runs, %u diverts, %u hazard "
+        "landings, %u no-safe-site\n",
+        static_cast<unsigned>(summary.hazard_zone_count),
+        static_cast<unsigned>(summary.divert_count),
+        static_cast<unsigned>(summary.hazard_landing_count),
+        static_cast<unsigned>(summary.no_safe_site_count));
     std::printf("Verdict:           %s\n",
                 all_safe ? "ALL RUNS SAFE" : "DISPERSION FAILURES");
 
