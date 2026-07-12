@@ -62,10 +62,12 @@ namespace gnc {
  */
 struct ThrustAllocatorConfig {
     F32 max_thrust_n = 2500.0F; /**< Engine thrust at throttle 1.0, > 0.    */
-    F32 max_pitch_rad = 0.785F; /**< Attitude authority given to the
-                                     translation loops; the vehicle never
-                                     commands a tilt beyond this. Range:
-                                     (0, pi/2).                             */
+    F32 max_pitch_rad = 1.047F; /**< Attitude authority given to the
+                                     translation loops (60 deg); the vehicle
+                                     never commands a tilt beyond this.
+                                     Sized so a hot gate (+3 sigma ground
+                                     speed) can still brake to the landing
+                                     site. Range: (0, pi/2).                */
 };
 
 /** @brief Pitch + throttle realization of an acceleration command. */

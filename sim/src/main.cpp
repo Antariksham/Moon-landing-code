@@ -58,6 +58,9 @@ constexpr lls::F64 kTouchdownHorizontalLimitMps = 1.0;
 /** Touchdown tilt limit, deg (config: touchdown_tilt_limit_deg). */
 constexpr lls::F64 kTouchdownTiltLimitDeg = 5.0;
 
+/** Landing-site miss limit, m (config: touchdown_miss_limit_m). */
+constexpr lls::F64 kTouchdownMissLimitM = 50.0;
+
 constexpr lls::F64 kRadToDeg = 57.29577951308232;
 
 /** Telemetry buffers: file-scope static because they are megabytes each
@@ -77,12 +80,15 @@ enum class SimMode : lls::U8 {
 struct CliOptions {
     SimMode mode = SimMode::k1Dof;
     bool perfect_nav = false;
+    bool hazard_at_target = false;
     bool altitude_set = false;
     bool velocity_set = false;
     bool horizontal_set = false;
+    bool target_set = false;
     lls::F64 initial_altitude_m = 0.0;
     lls::F64 initial_velocity_mps = 0.0;
     lls::F64 initial_horizontal_mps = 0.0;
+    lls::F64 target_downrange_m = 0.0;
     lls::U32 mc_runs = 200U;
     lls::U64 mc_seed = 0x5E1E4E5EEDULL;
     const char* telemetry_path = nullptr;
@@ -92,7 +98,8 @@ void PrintUsage(const char* prog) {
     std::fprintf(stderr,
                  "Usage: %s [--mode 1dof|3dof|mc] [--initial-altitude-m <v>] "
                  "[--initial-velocity-mps <v>] [--initial-horizontal-mps <v>] "
-                 "[--perfect-nav] [--runs <n>] [--seed <n>] "
+                 "[--target-downrange-m <v>] [--perfect-nav] "
+                 "[--hazard-at-target] [--runs <n>] [--seed <n>] "
                  "[--telemetry <out.csv>]\n",
                  prog);
 }
@@ -136,6 +143,13 @@ void PrintUsage(const char* prog) {
             opts->initial_horizontal_mps = std::atof(argv[i + 1]);
             opts->horizontal_set = true;
             ++i;
+        } else if ((std::strcmp(argv[i], "--target-downrange-m") == 0) &&
+                   has_value) {
+            opts->target_downrange_m = std::atof(argv[i + 1]);
+            opts->target_set = true;
+            ++i;
+        } else if (std::strcmp(argv[i], "--hazard-at-target") == 0) {
+            opts->hazard_at_target = true;
         } else if (std::strcmp(argv[i], "--perfect-nav") == 0) {
             opts->perfect_nav = true;
         } else if ((std::strcmp(argv[i], "--telemetry") == 0) && has_value) {
@@ -252,7 +266,18 @@ void PrintUsage(const char* prog) {
     if (opts.horizontal_set) {
         params.gate.velocity_x_mps = opts.initial_horizontal_mps;
     }
+    if (opts.target_set) {
+        params.target_downrange_m = opts.target_downrange_m;
+    }
     params.nav.use_perfect_navigation = opts.perfect_nav;
+    if (opts.hazard_at_target) {
+        /* Demo scenario: a boulder field squarely on the nominal site.   */
+        lls::sim::HazardZone zone{};
+        zone.start_m = params.target_downrange_m - 40.0;
+        zone.end_m = params.target_downrange_m + 40.0;
+        params.hazard_zones[0] = zone;
+        params.hazard_zone_count = 1U;
+    }
 
     lls::sim::ApproachSimResult result{};
     const lls::Status status =
@@ -276,7 +301,9 @@ void PrintUsage(const char* prog) {
         (result.touchdown_vertical_speed_mps <= kTouchdownVelocityLimitMps) &&
         (result.touchdown_horizontal_speed_mps <=
          kTouchdownHorizontalLimitMps) &&
-        (tilt_deg <= kTouchdownTiltLimitDeg);
+        (tilt_deg <= kTouchdownTiltLimitDeg) &&
+        (result.touchdown_miss_m <= kTouchdownMissLimitM) &&
+        !result.landed_on_hazard;
 
     std::printf("=== SELENE 3-DOF approach report ===\n");
     std::printf("Gate:              %.1f m, vx %.1f m/s, vz %.1f m/s\n",
@@ -292,6 +319,25 @@ void PrintUsage(const char* prog) {
                 kTouchdownHorizontalLimitMps);
     std::printf("Tilt at contact:   %.2f deg (limit %.1f)\n", tilt_deg,
                 kTouchdownTiltLimitDeg);
+    std::printf("Landing miss:      %.2f m (target %.0f m, limit %.0f)\n",
+                result.touchdown_miss_m, result.final_target_downrange_m,
+                kTouchdownMissLimitM);
+    if (result.hda_diverted) {
+        std::printf(
+            "HDA:               DIVERTED %.0f m (nominal %.0f m -> "
+            "%.0f m)\n",
+            result.hda_divert_distance_m, params.target_downrange_m,
+            result.final_target_downrange_m);
+    } else if (result.hda_no_safe_site) {
+        std::printf(
+            "HDA:               NO SAFE SITE in the divert envelope "
+            "— held nominal\n");
+    } else {
+        std::printf("HDA:               nominal site verified safe\n");
+    }
+    if (result.landed_on_hazard) {
+        std::printf("HDA:               LANDED ON HAZARDOUS TERRAIN\n");
+    }
     std::printf("Flight time:       %.1f s\n", result.flight_time_s);
     std::printf("Propellant used:   %.1f kg\n", result.propellant_used_kg);
     std::printf("Controller faults: %u\n",
@@ -325,22 +371,22 @@ void PrintUsage(const char* prog) {
                  "run,safe,gate_altitude_m,gate_velocity_x_mps,"
                  "gate_velocity_z_mps,gate_pitch_rad,touched_down,"
                  "vertical_speed_mps,horizontal_speed_mps,tilt_rad,"
-                 "downrange_m,flight_time_s,propellant_used_kg,"
+                 "downrange_m,miss_m,flight_time_s,propellant_used_kg,"
                  "nav_altitude_error_m,nav_velocity_error_mps,"
                  "controller_faults,nav_rejected_measurements\n");
     for (lls::U32 i = 0U; i < log.GetCount(); ++i) { /* Bounded loop. */
         const lls::sim::MonteCarloRunRecord& r = log.GetRecord(i);
         std::fprintf(file,
                      "%u,%u,%.2f,%.3f,%.3f,%.4f,%u,%.4f,%.4f,%.5f,%.2f,"
-                     "%.2f,%.3f,%.4f,%.4f,%u,%u\n",
+                     "%.2f,%.2f,%.3f,%.4f,%.4f,%u,%u\n",
                      static_cast<unsigned>(r.run_index), r.safe ? 1U : 0U,
                      r.gate_altitude_m, r.gate_velocity_x_mps,
                      r.gate_velocity_z_mps, r.gate_pitch_rad,
                      r.touched_down ? 1U : 0U, r.touchdown_vertical_speed_mps,
                      r.touchdown_horizontal_speed_mps, r.touchdown_tilt_rad,
-                     r.touchdown_downrange_m, r.flight_time_s,
-                     r.propellant_used_kg, r.nav_altitude_error_m,
-                     r.nav_velocity_error_mps,
+                     r.touchdown_downrange_m, r.touchdown_miss_m,
+                     r.flight_time_s, r.propellant_used_kg,
+                     r.nav_altitude_error_m, r.nav_velocity_error_mps,
                      static_cast<unsigned>(r.controller_fault_count),
                      static_cast<unsigned>(r.nav_rejected_measurement_count));
     }
@@ -358,6 +404,9 @@ void PrintMetric(const char* label, const lls::sim::MetricStats& stats,
     lls::sim::MonteCarloParams params{};
     params.run_count = opts.mc_runs;
     params.base_seed = opts.mc_seed;
+    if (opts.target_set) {
+        params.nominal.target_downrange_m = opts.target_downrange_m;
+    }
 
     lls::sim::MonteCarloSummary summary{};
     const lls::Status status =
@@ -403,6 +452,7 @@ void PrintMetric(const char* label, const lls::sim::MetricStats& stats,
     tilt_deg.max *= kRadToDeg;
     PrintMetric("Tilt:", tilt_deg, "deg (limit 5.0)");
     PrintMetric("Downrange:", summary.downrange_m, "m");
+    PrintMetric("Landing miss:", summary.miss_m, "m (limit 50)");
     PrintMetric("Flight time:", summary.flight_time_s, "s");
     PrintMetric("Propellant:", summary.propellant_used_kg, "kg");
     PrintMetric("Nav alt error:", summary.nav_altitude_error_m, "m");
@@ -410,6 +460,13 @@ void PrintMetric(const char* label, const lls::sim::MetricStats& stats,
     std::printf("Controller faults: %u total; gated altimeter returns: %u\n",
                 static_cast<unsigned>(summary.total_controller_faults),
                 static_cast<unsigned>(summary.total_nav_rejected_measurements));
+    std::printf(
+        "HDA:               %u hazard runs, %u diverts, %u hazard "
+        "landings, %u no-safe-site\n",
+        static_cast<unsigned>(summary.hazard_zone_count),
+        static_cast<unsigned>(summary.divert_count),
+        static_cast<unsigned>(summary.hazard_landing_count),
+        static_cast<unsigned>(summary.no_safe_site_count));
     std::printf("Verdict:           %s\n",
                 all_safe ? "ALL RUNS SAFE" : "DISPERSION FAILURES");
 

@@ -1,6 +1,6 @@
 /**
  * @file    descent_guidance.cpp
- * @brief   Implementation of the altitude-keyed descent guidance.
+ * @brief   Implementation of the state-keyed descent guidance.
  *
  * @see     descent_guidance.hpp for the profile equations and contracts.
  *
@@ -33,7 +33,9 @@ namespace {
                             std::isfinite(c.engine_cutoff_altitude_m) &&
                             std::isfinite(c.pitchover_altitude_m) &&
                             std::isfinite(c.horizontal_rate_slope_hz) &&
-                            std::isfinite(c.max_horizontal_rate_mps);
+                            std::isfinite(c.max_horizontal_rate_mps) &&
+                            std::isfinite(c.horizontal_brake_decel_mps2) &&
+                            std::isfinite(c.near_field_gain_hz);
     if (!all_finite) {
         return false;
     }
@@ -43,7 +45,8 @@ namespace {
         (c.engine_cutoff_altitude_m > 0.0F) &&
         (c.pitchover_altitude_m > 0.0F) &&
         (c.horizontal_rate_slope_hz > 0.0F) &&
-        (c.max_horizontal_rate_mps > 0.0F);
+        (c.max_horizontal_rate_mps > 0.0F) &&
+        (c.horizontal_brake_decel_mps2 > 0.0F) && (c.near_field_gain_hz > 0.0F);
     if (!all_positive) {
         return false;
     }
@@ -64,6 +67,7 @@ Status DescentGuidance::Init(const DescentGuidanceConfig& config) noexcept {
 }
 
 Status DescentGuidance::Update(const F32 altitude_m,
+                               const F32 downrange_to_go_m,
                                GuidanceCommand* const cmd_out) const noexcept {
     if (!is_initialized_) {
         return Status::kErrNotInitialized;
@@ -72,7 +76,7 @@ Status DescentGuidance::Update(const F32 altitude_m,
         LLS_ASSERT(cmd_out != nullptr); /* Caller wiring error.            */
         return Status::kErrInvalidParam;
     }
-    if (!std::isfinite(altitude_m)) {
+    if (!std::isfinite(altitude_m) || !std::isfinite(downrange_to_go_m)) {
         return Status::kErrNonFiniteInput;
     }
     if (altitude_m < 0.0F) {
@@ -95,16 +99,29 @@ Status DescentGuidance::Update(const F32 altitude_m,
         cmd.vertical_rate_cmd_mps = -config_.final_descent_rate_mps;
     }
 
-    /* Horizontal channel: allowed ground speed ramps to zero at the
-     * pitch-over gate, forcing the vehicle vertical before terminal
-     * descent. */
+    /* Horizontal channel (site targeting): the signed ground-speed command
+     * toward the site is the most restrictive of the range braking
+     * envelope (stop at the site), the near-field linear law (soft
+     * arrival), the altitude ramp (vertical by the pitch-over gate), and
+     * the ground-speed cap. */
     if (altitude_m > config_.pitchover_altitude_m) {
-        F32 ground_speed = config_.horizontal_rate_slope_hz *
-                           (altitude_m - config_.pitchover_altitude_m);
-        ground_speed = (ground_speed > config_.max_horizontal_rate_mps)
-                           ? config_.max_horizontal_rate_mps
-                           : ground_speed;
-        cmd.horizontal_rate_cmd_mps = ground_speed;
+        const F32 range_m = std::fabs(downrange_to_go_m);
+
+        const F32 envelope_speed =
+            std::sqrt(2.0F * config_.horizontal_brake_decel_mps2 * range_m);
+        const F32 near_field_speed = config_.near_field_gain_hz * range_m;
+        const F32 ramp_speed = config_.horizontal_rate_slope_hz *
+                               (altitude_m - config_.pitchover_altitude_m);
+        LLS_ASSERT(ramp_speed >= 0.0F); /* Guarded by the branch above.    */
+
+        F32 speed = envelope_speed;
+        speed = (near_field_speed < speed) ? near_field_speed : speed;
+        speed = (ramp_speed < speed) ? ramp_speed : speed;
+        speed = (speed > config_.max_horizontal_rate_mps)
+                    ? config_.max_horizontal_rate_mps
+                    : speed;
+        cmd.horizontal_rate_cmd_mps =
+            (downrange_to_go_m < 0.0F) ? -speed : speed;
         cmd.terminal_phase = false;
     } else {
         cmd.horizontal_rate_cmd_mps = 0.0F;

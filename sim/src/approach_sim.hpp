@@ -57,9 +57,11 @@
 #include "gnc/control/thrust_allocator.hpp"
 #include "gnc/guidance/descent_guidance.hpp"
 #include "gnc/navigation/vertical_nav_filter.hpp"
+#include "hda/safe_site_selector.hpp"
 #include "lander_dynamics_3dof.hpp"
 #include "lls/lls_types.hpp"
 #include "sensor_models.hpp"
+#include "terrain_model.hpp"
 
 namespace lls {
 namespace sim {
@@ -91,17 +93,54 @@ struct NavScenarioParams {
     AltimeterModelParams altimeter{}; /**< Radar-altimeter error model.    */
 };
 
+/**
+ * @brief Hazard detection & avoidance configuration (milestone 6).
+ *
+ * At the first control cycle in APPROACH with the navigation altitude at
+ * or below `scan_altitude_m`, the sim's terrain-mapper stand-in surveys
+ * the ground around the current target (perfect terrain sensing; LIDAR
+ * noise is a follow-up) and the flight `SafeSiteSelector` decides whether
+ * to keep the site or divert. Guidance re-targets on the spot — the
+ * site-targeting law accepts any reachable target.
+ */
+struct HdaScenarioParams {
+    bool enabled = true; /**< False: fly the nominal target blind.         */
+
+    hda::SafeSiteSelectorConfig selector{}; /**< Flight mission limits.    */
+
+    F64 scan_altitude_m = 1000.0;   /**< Decision gate: high enough that the
+                                         full divert envelope is reachable
+                                         before the pitch-over altitude.     */
+    F64 survey_halfwidth_m = 300.0; /**< Mapped span around the target
+                                         (matches the divert envelope).    */
+    F64 sample_spacing_m = 4.0;     /**< Survey station spacing. Must not
+                                         exceed the selector's footprint
+                                         radius, or every candidate fails the
+                                         coverage check.                       */
+};
+
 /** @brief Scenario configuration (defaults mirror config/landing_params.yaml).
  */
 struct ApproachScenarioParams {
     VehicleParams3Dof vehicle{}; /**< Truth-model constants.               */
     Gate3Dof gate{};             /**< Approach handover state.             */
 
+    TerrainParams terrain{}; /**< Base surface properties.                 */
+    std::array<HazardZone, TerrainModel::kMaxHazardZones> hazard_zones{};
+    U32 hazard_zone_count = 0U; /**< Valid entries in `hazard_zones`.      */
+    HdaScenarioParams hda{};    /**< Terrain survey + divert decision.     */
+
     gnc::DescentGuidanceConfig guidance{};  /**< Flight guidance profile.   */
     gnc::ThrustAllocatorConfig allocator{}; /**< Control allocation limits.
                                                  `max_thrust_n` must match
                                                  the truth vehicle.        */
     NavScenarioParams nav{};                /**< Sensors + flight filter.   */
+
+    F64 target_downrange_m = 1200.0; /**< Landing-site position, measured
+                                          from the gate (downrange 0),
+                                          along +x. Mission design must
+                                          pick a site the gate energy and
+                                          the guidance ramp can reach.     */
 
     F64 control_rate_hz = 50.0;     /**< Flight control loop rate.        */
     F64 max_sim_duration_s = 600.0; /**< Hard bound on the sim loop.      */
@@ -134,6 +173,19 @@ struct ApproachSimResult {
     F64 touchdown_tilt_rad = 0.0;             /**< |pitch| at contact.     */
     F64 touchdown_downrange_m = 0.0;          /**< Ground track flown to contact
                                                    (landing-footprint statistic).   */
+    F64 touchdown_miss_m = 0.0; /**< |final target - contact point| along
+                                     track (site-targeting accuracy,
+                                     measured against the post-divert
+                                     target).                              */
+    F64 final_target_downrange_m = 0.0; /**< Target actually flown to
+                                             (post-divert).                */
+    bool hda_diverted = false;       /**< HDA moved the landing site.       */
+    F64 hda_divert_distance_m = 0.0; /**< |new - nominal| target shift.    */
+    bool hda_no_safe_site = false;   /**< Survey found nothing acceptable;
+                                          vehicle held the nominal target
+                                          under fault protection.           */
+    bool landed_on_hazard = false;   /**< Truth terrain at the contact point
+                                          violates the mission limits.      */
     F64 flight_time_s = 0.0;         /**< Elapsed sim time.                   */
     F64 propellant_used_kg = 0.0;    /**< Propellant consumed.                */
     U32 controller_fault_count = 0U; /**< Non-nominal flight-code statuses

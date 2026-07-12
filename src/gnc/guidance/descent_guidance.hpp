@@ -1,14 +1,15 @@
 /**
  * @file    descent_guidance.hpp
- * @brief   Altitude-keyed powered-descent guidance for approach and terminal
- *          descent (Phase I milestone 2).
+ * @brief   State-keyed powered-descent guidance for approach and terminal
+ *          descent (Phase I milestones 2 + 5).
  *
  * @details First flight guidance module of Project SELENE. Produces the
  *          velocity references the control loops track during the approach
- *          and terminal-descent mission phases, keyed to altitude in the
- *          Apollo tradition (references are a function of where the vehicle
- *          is, not of time, so the profile is robust to dispersions in when
- *          the vehicle gets there).
+ *          and terminal-descent mission phases, keyed to where the vehicle
+ *          is — altitude and range-to-go — in the Apollo tradition
+ *          (references are a function of position, not of time, so the
+ *          profile is robust to dispersions in when the vehicle gets
+ *          there).
  *
  *          Vertical channel (identical shape to the milestone 1 profile):
  *
@@ -19,16 +20,23 @@
  *          i.e. a constant-deceleration braking envelope into a constant
  *          final descent rate below the terminal gate `h_t`.
  *
- *          Horizontal channel (the pitch-over schedule):
+ *          Horizontal channel (site targeting, milestone 5): the signed
+ *          ground-speed command toward the landing site is the most
+ *          restrictive of three constraints —
  *
- *              vx_cmd(h) = min(vx_max, s * (h - h_po))   for h >  h_po
- *              vx_cmd(h) = 0                             for h <= h_po
+ *              range envelope:  sqrt(2 * a_h * |r|)   (stop at the site)
+ *              near field:      k * |r|               (soft arrival)
+ *              altitude ramp:   s * (h - h_po)        (vertical by h_po)
  *
- *          i.e. the allowed ground speed shrinks linearly with altitude and
- *          reaches zero at the pitch-over altitude `h_po`. Tracking this
- *          ramp forces the vehicle to trade its horizontal approach speed
- *          for a vertical attitude as it descends — the pitch-over
- *          maneuver — and guarantees a purely vertical terminal descent.
+ *              vx_cmd(h, r) = sign(r) * min(envelope, near, ramp, vx_max)
+ *
+ *          where `r` is the downrange-to-go. Far away, the vehicle flies
+ *          the altitude ramp (the pitch-over schedule); approaching the
+ *          site, the range envelope brakes it so it arrives overhead with
+ *          zero ground speed and descends vertically. Overshoot flips the
+ *          sign and flies the vehicle back. Below the pitch-over altitude
+ *          the ramp term is zero: the terminal descent is vertical by
+ *          construction and any residual range error is the landing miss.
  *
  *          The module also raises two discrete commands:
  *            - `terminal_phase` when h <= h_po: the executive should
@@ -80,18 +88,30 @@ struct DescentGuidanceConfig {
                                                of altitude above pitch-over,
                                                (m/s)/m = 1/s. Range > 0.    */
     F32 max_horizontal_rate_mps = 80.0F;  /**< Ground-speed cap, > 0.       */
+
+    F32 horizontal_brake_decel_mps2 = 0.8F; /**< Range-to-go envelope
+                                                 deceleration, > 0. Must be
+                                                 well under the horizontal
+                                                 authority the pitch limit
+                                                 allows (~2 m/s^2).         */
+    F32 near_field_gain_hz = 0.2F; /**< Linear position gain used inside
+                                        the range envelope: ground speed
+                                        per meter of range-to-go, 1/s.
+                                        Range > 0.                          */
 };
 
 /**
  * @brief Velocity references and discrete commands for one guidance cycle.
  *
  * Sign conventions: up is positive for the vertical rate (descent commands
- * are negative); the horizontal rate is a non-negative allowed ground speed
- * along the approach direction of travel.
+ * are negative); the horizontal rate is signed along the downrange axis —
+ * positive commands fly toward +x (the landing site when range-to-go is
+ * positive).
  */
 struct GuidanceCommand {
     F32 vertical_rate_cmd_mps = 0.0F;   /**< Commanded vertical velocity.   */
-    F32 horizontal_rate_cmd_mps = 0.0F; /**< Allowed ground speed, >= 0.    */
+    F32 horizontal_rate_cmd_mps = 0.0F; /**< Signed ground-speed command
+                                             toward the landing site.       */
     bool terminal_phase = false;        /**< True at/below pitch-over altitude:
                                              attitude must be vertical and the
                                              executive should enter
@@ -138,23 +158,29 @@ class DescentGuidance {
     [[nodiscard]] Status Init(const DescentGuidanceConfig& config) noexcept;
 
     /**
-     * @brief   Compute the velocity references for the current altitude.
+     * @brief   Compute the velocity references for the current state.
      *
      * @details On any failure the value at @p cmd_out is left unmodified,
      *          so the caller's previous reference is preserved by
      *          construction (same convention as `PidController::Update()`).
      *
-     * @param   altitude_m  Estimated height above the landing site, m.
-     *                      Valid range: [0, finite).
-     * @param   cmd_out     Non-null pointer receiving the references.
+     * @param   altitude_m         Estimated height above the landing site,
+     *                             m. Valid range: [0, finite).
+     * @param   downrange_to_go_m  Signed ground distance from the vehicle
+     *                             to the landing site along +x, m
+     *                             (negative = site is behind). Must be
+     *                             finite.
+     * @param   cmd_out            Non-null pointer receiving the
+     *                             references.
      *
      * @retval  Status::kSuccess           References written.
      * @retval  Status::kErrNotInitialized `Init()` has not succeeded.
      * @retval  Status::kErrInvalidParam   @p cmd_out is null or
      *                                     @p altitude_m is negative.
-     * @retval  Status::kErrNonFiniteInput @p altitude_m is NaN or Inf.
+     * @retval  Status::kErrNonFiniteInput @p altitude_m or
+     *                                     @p downrange_to_go_m is NaN/Inf.
      */
-    [[nodiscard]] Status Update(F32 altitude_m,
+    [[nodiscard]] Status Update(F32 altitude_m, F32 downrange_to_go_m,
                                 GuidanceCommand* cmd_out) const noexcept;
 
  private:

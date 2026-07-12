@@ -184,9 +184,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
 ├── src/                    # Flight code (JPL/MISRA rules apply)
 │   ├── fsw/                #   Flight executive & mission state machine
 │   ├── gnc/                #   Guidance, Navigation & Control
-│   │   ├── guidance/       #     Powered-descent guidance, divert logic
-│   │   ├── navigation/     #     EKF, TRN, sensor fusion
-│   │   └── control/        #     PID / attitude / throttle controllers
+│   │   ├── guidance/       #     Powered-descent guidance, site targeting
+│   │   ├── navigation/     #     Vertical nav filter, TRN, sensor fusion
+│   │   └── control/        #     PID / thrust allocation / attitude
+│   ├── hda/                #   Hazard detection & avoidance (safe-site
+│   │                       #   selection, divert recommendation)
 │   ├── fdir/               #   Fault detection, isolation & recovery
 │   └── hal/                #   Hardware abstraction layer (drivers)
 ├── include/lls/            # Public cross-module headers (types, assert)

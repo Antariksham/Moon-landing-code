@@ -116,8 +116,17 @@ class RunningStats {
         std::isfinite(p.criteria.max_horizontal_speed_mps) &&
         (p.criteria.max_horizontal_speed_mps > 0.0) &&
         std::isfinite(p.criteria.max_tilt_rad) &&
-        (p.criteria.max_tilt_rad > 0.0);
-    return criteria_valid && (p.run_count >= 1U) &&
+        (p.criteria.max_tilt_rad > 0.0) &&
+        std::isfinite(p.criteria.max_miss_distance_m) &&
+        (p.criteria.max_miss_distance_m > 0.0);
+    const bool hazards_valid = std::isfinite(p.hazards.hazard_probability) &&
+                               (p.hazards.hazard_probability >= 0.0) &&
+                               (p.hazards.hazard_probability <= 1.0) &&
+                               std::isfinite(p.hazards.zone_length_m) &&
+                               (p.hazards.zone_length_m > 0.0) &&
+                               std::isfinite(p.hazards.center_offset_sigma_m) &&
+                               (p.hazards.center_offset_sigma_m >= 0.0);
+    return criteria_valid && hazards_valid && (p.run_count >= 1U) &&
            (p.run_count <= kMaxMonteCarloRuns);
 }
 
@@ -180,6 +189,19 @@ class RunningStats {
     s.nav.altimeter.noise_seed =
         MixSeed(params.base_seed, (run_salt * 2U) + 1U);
 
+    /* Terrain hazard: both deviates are always consumed so the draw
+     * sequence stays aligned across hazard-probability settings.         */
+    const F64 hazard_roll = gen.NextUniform();
+    const F64 center_offset_m = Draw(gen, params.hazards.center_offset_sigma_m);
+    if (hazard_roll < params.hazards.hazard_probability) {
+        HazardZone zone{};
+        const F64 center_m = s.target_downrange_m + center_offset_m;
+        zone.start_m = center_m - (0.5 * params.hazards.zone_length_m);
+        zone.end_m = center_m + (0.5 * params.hazards.zone_length_m);
+        s.hazard_zones[0] = zone;
+        s.hazard_zone_count = 1U;
+    }
+
     return s;
 }
 
@@ -191,7 +213,9 @@ class RunningStats {
             criteria.max_vertical_speed_mps) &&
            (result.touchdown_horizontal_speed_mps <=
             criteria.max_horizontal_speed_mps) &&
-           (result.touchdown_tilt_rad <= criteria.max_tilt_rad);
+           (result.touchdown_tilt_rad <= criteria.max_tilt_rad) &&
+           (result.touchdown_miss_m <= criteria.max_miss_distance_m) &&
+           !result.landed_on_hazard;
 }
 
 /** @brief Accumulators for every summary metric, filled run by run. */
@@ -200,6 +224,7 @@ struct CampaignStats {
     RunningStats horizontal_speed;
     RunningStats tilt;
     RunningStats downrange;
+    RunningStats miss;
     RunningStats flight_time;
     RunningStats propellant;
     RunningStats nav_altitude_error;
@@ -234,6 +259,10 @@ Status RunMonteCarlo(const MonteCarloParams& params,
         record.gate_velocity_x_mps = scenario.gate.velocity_x_mps;
         record.gate_velocity_z_mps = scenario.gate.velocity_z_mps;
         record.gate_pitch_rad = scenario.gate.pitch_rad;
+        record.hazard_zone_present = (scenario.hazard_zone_count > 0U);
+        if (record.hazard_zone_present) {
+            ++summary_out->hazard_zone_count;
+        }
 
         ApproachSimResult result{};
         const Status run_status = RunApproachSim(scenario, &result, nullptr);
@@ -245,6 +274,7 @@ Status RunMonteCarlo(const MonteCarloParams& params,
                 result.touchdown_horizontal_speed_mps;
             record.touchdown_tilt_rad = result.touchdown_tilt_rad;
             record.touchdown_downrange_m = result.touchdown_downrange_m;
+            record.touchdown_miss_m = result.touchdown_miss_m;
             record.flight_time_s = result.flight_time_s;
             record.propellant_used_kg = result.propellant_used_kg;
             record.nav_altitude_error_m = result.touchdown_nav_altitude_error_m;
@@ -253,12 +283,26 @@ Status RunMonteCarlo(const MonteCarloParams& params,
             record.controller_fault_count = result.controller_fault_count;
             record.nav_rejected_measurement_count =
                 result.nav_rejected_measurement_count;
+            record.hda_diverted = result.hda_diverted;
+            record.hda_divert_distance_m = result.hda_divert_distance_m;
+            record.landed_on_hazard = result.landed_on_hazard;
+            record.hda_no_safe_site = result.hda_no_safe_site;
+            if (result.hda_diverted) {
+                ++summary_out->divert_count;
+            }
+            if (result.landed_on_hazard) {
+                ++summary_out->hazard_landing_count;
+            }
+            if (result.hda_no_safe_site) {
+                ++summary_out->no_safe_site_count;
+            }
             record.safe = IsRunSafe(result, params.criteria);
 
             stats.vertical_speed.Add(result.touchdown_vertical_speed_mps);
             stats.horizontal_speed.Add(result.touchdown_horizontal_speed_mps);
             stats.tilt.Add(result.touchdown_tilt_rad);
             stats.downrange.Add(result.touchdown_downrange_m);
+            stats.miss.Add(result.touchdown_miss_m);
             stats.flight_time.Add(result.flight_time_s);
             stats.propellant.Add(result.propellant_used_kg);
             stats.nav_altitude_error.Add(result.touchdown_nav_altitude_error_m);
@@ -288,6 +332,7 @@ Status RunMonteCarlo(const MonteCarloParams& params,
     summary_out->horizontal_speed_mps = stats.horizontal_speed.Finalize();
     summary_out->tilt_rad = stats.tilt.Finalize();
     summary_out->downrange_m = stats.downrange.Finalize();
+    summary_out->miss_m = stats.miss.Finalize();
     summary_out->flight_time_s = stats.flight_time.Finalize();
     summary_out->propellant_used_kg = stats.propellant.Finalize();
     summary_out->nav_altitude_error_m = stats.nav_altitude_error.Finalize();

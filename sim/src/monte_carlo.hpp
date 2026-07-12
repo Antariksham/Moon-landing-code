@@ -50,6 +50,8 @@ struct LandingCriteria {
                                              touchdown_horizontal_limit_mps.*/
     F64 max_tilt_rad = 0.0873;          /**< config: touchdown_tilt_limit_deg
                                              (5 deg).                      */
+    F64 max_miss_distance_m = 50.0;     /**< config: touchdown_miss_limit_m
+                                             (site-targeting accuracy).    */
 };
 
 /**
@@ -79,10 +81,27 @@ struct DispersionSigmas {
                                            drawn centered on zero.         */
 };
 
+/**
+ * @brief Terrain-hazard dispersion: some fraction of runs must divert.
+ *
+ * With probability `hazard_probability` a run gets a hazard zone whose
+ * center is drawn around the nominal site (truncated Gaussian), forcing
+ * the HDA decision gate to actually earn its keep across the campaign.
+ */
+struct HazardDispersion {
+    F64 hazard_probability = 0.5; /**< Fraction of runs with a hazard near
+                                       the site, in [0, 1].                */
+    F64 zone_length_m = 60.0;     /**< Hazard zone extent, > 0.            */
+    F64 center_offset_sigma_m = 40.0; /**< 1-sigma placement of the zone
+                                           center around the nominal site
+                                           (0 pins it dead center).        */
+};
+
 /** @brief Campaign configuration. */
 struct MonteCarloParams {
     ApproachScenarioParams nominal{}; /**< Center of the dispersions.      */
     DispersionSigmas sigmas{};        /**< 1-sigma dispersion magnitudes.  */
+    HazardDispersion hazards{};       /**< Terrain-hazard placement.       */
     LandingCriteria criteria{};       /**< Pass/fail limits per run.       */
     U32 run_count = 200U;             /**< Runs to fly, in [1, kMaxRuns].  */
     U64 base_seed = 0x5E1E4E5EEDULL;  /**< Fixes the entire campaign.      */
@@ -105,12 +124,19 @@ struct MonteCarloRunRecord {
     F64 touchdown_horizontal_speed_mps = 0.0;
     F64 touchdown_tilt_rad = 0.0;
     F64 touchdown_downrange_m = 0.0;
+    F64 touchdown_miss_m = 0.0;
     F64 flight_time_s = 0.0;
     F64 propellant_used_kg = 0.0;
     F64 nav_altitude_error_m = 0.0;
     F64 nav_velocity_error_mps = 0.0;
     U32 controller_fault_count = 0U;
     U32 nav_rejected_measurement_count = 0U;
+
+    bool hazard_zone_present = false; /**< This run drew a hazard zone.    */
+    bool hda_diverted = false;        /**< HDA moved the landing site.     */
+    F64 hda_divert_distance_m = 0.0;  /**< Target shift, m.                */
+    bool landed_on_hazard = false;    /**< Contact point violates limits.  */
+    bool hda_no_safe_site = false;    /**< Survey found nothing usable.    */
 };
 
 /** @brief Mean/deviation/extremes of one scalar metric across the runs. */
@@ -134,6 +160,8 @@ struct MonteCarloSummary {
     MetricStats tilt_rad{};               /**< Touchdown tilt.               */
     MetricStats downrange_m{};            /**< Landing footprint (along
                                                track).                       */
+    MetricStats miss_m{};                 /**< Distance from the targeted
+                                               site at contact.              */
     MetricStats flight_time_s{};          /**< Gate to touchdown.            */
     MetricStats propellant_used_kg{};     /**< Fuel budget statistic.        */
     MetricStats nav_altitude_error_m{};   /**< Estimator error at contact.   */
@@ -141,6 +169,14 @@ struct MonteCarloSummary {
 
     U32 total_controller_faults = 0U; /**< Sum across all runs.          */
     U32 total_nav_rejected_measurements = 0U; /**< Sum across all runs.    */
+
+    U32 hazard_zone_count = 0U;    /**< Runs that drew a hazard zone.       */
+    U32 divert_count = 0U;         /**< Runs where HDA moved the site.      */
+    U32 hazard_landing_count = 0U; /**< Runs that touched down on
+                                        hazardous terrain (must be 0 for a
+                                        clean campaign).                   */
+    U32 no_safe_site_count = 0U;   /**< Runs where the survey had no
+                                        acceptable site.                    */
 };
 
 /** @brief Fixed-capacity per-run recorder (rule #1: no heap, even here). */
