@@ -64,6 +64,8 @@ enum class Status : U8 {
     kErrNonFiniteInput = 3U, /**< NaN or Inf received on a real-typed input.*/
     kErrIllegalTransition = 4U, /**< Rejected mission-phase transition.      */
     kErrSaturated = 5U, /**< Output limited; result is safe but clipped.*/
+    kErrMeasurementRejected = 6U, /**< Estimator innovation gate rejected a
+                                       sensor measurement; state untouched.*/
 };
 
 /**

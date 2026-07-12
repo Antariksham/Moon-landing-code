@@ -7,8 +7,10 @@
 add_library(selene_sim_core STATIC
     src/lander_dynamics.cpp
     src/lander_dynamics_3dof.cpp
+    src/sensor_models.cpp
     src/descent_sim.cpp
-    src/approach_sim.cpp)
+    src/approach_sim.cpp
+    src/monte_carlo.cpp)
 
 target_include_directories(selene_sim_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src)

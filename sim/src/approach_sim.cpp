@@ -133,8 +133,26 @@ constexpr F32 kGravityFeedforwardMps2 = static_cast<F32>(kLunarGravityMps2);
     return true;
 }
 
+/**
+ * @brief   Compose the flight filter's configuration for this scenario.
+ *
+ * @details The filter is seeded from the gate state plus the configured
+ *          navigation-handover errors — the upstream orbit solution is
+ *          good, not perfect.
+ */
+[[nodiscard]] gnc::VerticalNavFilterConfig MakeNavFilterConfig(
+    const ApproachScenarioParams& params) noexcept {
+    gnc::VerticalNavFilterConfig cfg = params.nav.filter;
+    cfg.initial_altitude_m = static_cast<F32>(
+        params.gate.altitude_m + params.nav.initial_altitude_error_m);
+    cfg.initial_velocity_mps = static_cast<F32>(
+        params.gate.velocity_z_mps + params.nav.initial_velocity_error_mps);
+    return cfg;
+}
+
 /** @brief The flight components in the loop, initialized as one unit. */
 struct FlightStack {
+    gnc::VerticalNavFilter nav_filter;
     gnc::DescentGuidance guidance;
     gnc::PidController horizontal_pid;
     gnc::PidController vertical_pid;
@@ -143,7 +161,8 @@ struct FlightStack {
     fsw::MissionStateMachine executive;
 
     [[nodiscard]] bool Init(const ApproachScenarioParams& params) noexcept {
-        return IsSuccess(guidance.Init(params.guidance)) &&
+        return IsSuccess(nav_filter.Init(MakeNavFilterConfig(params))) &&
+               IsSuccess(guidance.Init(params.guidance)) &&
                IsSuccess(
                    horizontal_pid.Init(MakeHorizontalVelocityPidConfig())) &&
                IsSuccess(vertical_pid.Init(MakeVerticalVelocityPidConfig())) &&
@@ -165,29 +184,37 @@ struct CycleCommands {
  *
  * @details Guidance -> velocity loops -> allocation -> attitude loop. On a
  *          flight-code fault the previous cycle's commands are held, as the
- *          flight executive would.
+ *          flight executive would. The vertical channel consumes the
+ *          navigation solution; the horizontal and attitude channels read
+ *          truth (perfect navigation) until they get sensors of their own.
  *
- * @param   stack        Flight components (updated in place).
- * @param   truth        Current truth state (perfect-navigation stand-in).
- * @param   dt_s         Control interval, s.
- * @param   gcmd         In/out: last valid guidance command.
- * @param   previous     Commands held from the previous cycle.
- * @param   fault_count  In/out: incremented once per faulted cycle.
+ * @param   stack              Flight components (updated in place).
+ * @param   truth              Current truth state.
+ * @param   nav_altitude_m     Navigation altitude estimate, m.
+ * @param   nav_velocity_z_mps Navigation vertical-velocity estimate, m/s.
+ * @param   dt_s               Control interval, s.
+ * @param   gcmd               In/out: last valid guidance command.
+ * @param   previous           Commands held from the previous cycle.
+ * @param   fault_count        In/out: incremented once per faulted cycle.
  * @return  Commands to apply for this cycle.
  */
-[[nodiscard]] CycleCommands RunControlCycle(FlightStack& stack,
-                                            const LanderState3Dof& truth,
-                                            const F64 dt_s,
-                                            gnc::GuidanceCommand& gcmd,
-                                            const CycleCommands& previous,
-                                            U32& fault_count) noexcept {
+[[nodiscard]] CycleCommands RunControlCycle(
+    FlightStack& stack, const LanderState3Dof& truth, const F64 nav_altitude_m,
+    const F64 nav_velocity_z_mps, const F64 dt_s, gnc::GuidanceCommand& gcmd,
+    const CycleCommands& previous, U32& fault_count) noexcept {
     CycleCommands cmds{};
     const F32 dt_f32 = static_cast<F32>(dt_s);
     bool faulted = false;
 
+    /* Guidance flies the navigation altitude. Noise can push the estimate
+     * fractionally below zero near the surface; the executive sanitizes
+     * to the guidance contract's domain instead of faulting.             */
+    const F64 guidance_altitude_m =
+        (nav_altitude_m > 0.0) ? nav_altitude_m : 0.0;
+
     /* Guidance: on fault, gcmd is left holding the previous reference.   */
-    if (IsFault(
-            stack.guidance.Update(static_cast<F32>(truth.altitude_m), &gcmd))) {
+    if (IsFault(stack.guidance.Update(static_cast<F32>(guidance_altitude_m),
+                                      &gcmd))) {
         faulted = true;
     }
 
@@ -213,7 +240,7 @@ struct CycleCommands {
             gcmd.horizontal_rate_cmd_mps,
             static_cast<F32>(truth.velocity_x_mps), dt_f32, &accel_x_cmd);
         const Status sz = stack.vertical_pid.Update(
-            gcmd.vertical_rate_cmd_mps, static_cast<F32>(truth.velocity_z_mps),
+            gcmd.vertical_rate_cmd_mps, static_cast<F32>(nav_velocity_z_mps),
             dt_f32, &accel_z_corr);
 
         gnc::ThrustCommand thrust_cmd{};
@@ -267,10 +294,15 @@ Status RunApproachSim(const ApproachScenarioParams& params,
         (params.max_sim_duration_s <= 0.0)) {
         return Status::kErrInvalidParam;
     }
-    /* The allocator's thrust constant must describe the actual engine, or
-     * every throttle command is scaled wrong.                            */
+    /* The allocator's thrust constant must describe the actual engine to
+     * within calibration tolerance (10%), or every throttle command is
+     * scaled wrong beyond what the velocity loops can absorb. Inside the
+     * tolerance the mismatch is realistic — the flight software carries
+     * the nominal engine model while the real engine is dispersed — and
+     * the loops trim it out.                                             */
     if (std::fabs(static_cast<F64>(params.allocator.max_thrust_n) -
-                  params.vehicle.max_thrust_n) > 0.5) {
+                  params.vehicle.max_thrust_n) >
+        (0.1 * params.vehicle.max_thrust_n)) {
         return Status::kErrInvalidParam;
     }
 
@@ -284,6 +316,15 @@ Status RunApproachSim(const ApproachScenarioParams& params,
         return Status::kErrInvalidParam;
     }
 
+    ImuModel imu;
+    AltimeterModel altimeter;
+    if (!params.nav.use_perfect_navigation) {
+        if (!IsSuccess(imu.Init(params.nav.imu)) ||
+            !IsSuccess(altimeter.Init(params.nav.altimeter))) {
+            return Status::kErrInvalidParam;
+        }
+    }
+
     *result_out = ApproachSimResult{};
     const F64 dt_s = 1.0 / params.control_rate_hz;
     const F64 initial_propellant_kg = dynamics.GetPropellantRemainingKg();
@@ -293,13 +334,53 @@ Status RunApproachSim(const ApproachScenarioParams& params,
         static_cast<U64>(params.max_sim_duration_s / dt_s) + 1U;
 
     F64 time_s = 0.0;
+    F64 prev_velocity_z_mps = params.gate.velocity_z_mps;
     gnc::GuidanceCommand gcmd{};
     CycleCommands cmds{};
 
     for (U64 step = 0U; step < max_steps; ++step) {
         const LanderState3Dof& truth = dynamics.GetState();
 
-        cmds = RunControlCycle(stack, truth, dt_s, gcmd, cmds,
+        /* --- Navigation: sensors -> flight filter -> estimate. -------- */
+        F64 nav_altitude_m = truth.altitude_m;
+        F64 nav_velocity_z_mps = truth.velocity_z_mps;
+        if (!params.nav.use_perfect_navigation) {
+            if (step > 0U) {
+                /* The IMU's delta-v over the previous interval, corrupted
+                 * by the sensor model. An accelerometer measures specific
+                 * force, hence the +g / -g bracket around the model.     */
+                const F64 accel_true_mps2 =
+                    (truth.velocity_z_mps - prev_velocity_z_mps) / dt_s;
+                const F64 specific_force_meas_mps2 =
+                    imu.MeasureAccel(accel_true_mps2 + kLunarGravityMps2);
+                if (IsFault(stack.nav_filter.Predict(
+                        static_cast<F32>(specific_force_meas_mps2 -
+                                         kLunarGravityMps2),
+                        static_cast<F32>(dt_s)))) {
+                    ++result_out->controller_fault_count;
+                }
+            }
+            if ((step % static_cast<U64>(altimeter.GetUpdateDivisor())) == 0U) {
+                const F64 altitude_meas_m =
+                    altimeter.MeasureAltitude(truth.altitude_m);
+                const Status update_status = stack.nav_filter.UpdateAltitude(
+                    static_cast<F32>(altitude_meas_m));
+                /* A gate rejection is an expected sensor event, tracked
+                 * by the filter itself — not a flight-code fault.        */
+                if (IsFault(update_status) &&
+                    (update_status != Status::kErrMeasurementRejected)) {
+                    ++result_out->controller_fault_count;
+                }
+            }
+            const gnc::VerticalNavEstimate estimate =
+                stack.nav_filter.GetEstimate();
+            nav_altitude_m = static_cast<F64>(estimate.altitude_m);
+            nav_velocity_z_mps = static_cast<F64>(estimate.velocity_mps);
+        }
+        prev_velocity_z_mps = truth.velocity_z_mps;
+
+        cmds = RunControlCycle(stack, truth, nav_altitude_m, nav_velocity_z_mps,
+                               dt_s, gcmd, cmds,
                                result_out->controller_fault_count);
 
         if (log_out != nullptr) {
@@ -318,6 +399,8 @@ Status RunApproachSim(const ApproachScenarioParams& params,
             sample.throttle_frac = cmds.throttle_frac;
             sample.torque_frac = cmds.torque_frac;
             sample.mass_kg = truth.mass_kg;
+            sample.nav_altitude_m = nav_altitude_m;
+            sample.nav_velocity_z_mps = nav_velocity_z_mps;
             sample.mission_phase = static_cast<U8>(stack.executive.GetPhase());
             log_out->Record(sample);
         }
@@ -348,12 +431,25 @@ Status RunApproachSim(const ApproachScenarioParams& params,
     result_out->touchdown_horizontal_speed_mps =
         std::fabs(final_state.velocity_x_mps);
     result_out->touchdown_tilt_rad = std::fabs(final_state.pitch_rad);
+    result_out->touchdown_downrange_m = final_state.downrange_m;
     result_out->flight_time_s = time_s;
     result_out->propellant_used_kg =
         initial_propellant_kg - dynamics.GetPropellantRemainingKg();
     result_out->final_phase = stack.executive.GetPhase();
     result_out->rejected_transition_count =
         stack.executive.GetRejectedTransitionCount();
+
+    if (!params.nav.use_perfect_navigation) {
+        const gnc::VerticalNavEstimate estimate =
+            stack.nav_filter.GetEstimate();
+        result_out->nav_rejected_measurement_count =
+            stack.nav_filter.GetRejectedMeasurementCount();
+        result_out->touchdown_nav_altitude_error_m = std::fabs(
+            static_cast<F64>(estimate.altitude_m) - final_state.altitude_m);
+        result_out->touchdown_nav_velocity_error_mps =
+            std::fabs(static_cast<F64>(estimate.velocity_mps) -
+                      final_state.velocity_z_mps);
+    }
     return Status::kSuccess;
 }
 

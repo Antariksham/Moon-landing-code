@@ -17,6 +17,7 @@ add_executable(selene_unit_tests
     gnc/test_pid_controller.cpp
     gnc/test_descent_guidance.cpp
     gnc/test_thrust_allocator.cpp
+    gnc/test_vertical_nav_filter.cpp
     fsw/test_mission_state_machine.cpp)
 
 target_link_libraries(selene_unit_tests PRIVATE
@@ -27,7 +28,9 @@ target_link_libraries(selene_unit_tests PRIVATE
 if(TARGET selene_sim_core)
     target_sources(selene_unit_tests PRIVATE
         sim/test_descent_sim.cpp
-        sim/test_approach_sim.cpp)
+        sim/test_approach_sim.cpp
+        sim/test_sensor_models.cpp
+        sim/test_monte_carlo.cpp)
     target_link_libraries(selene_unit_tests PRIVATE selene_sim_core)
 endif()
 
