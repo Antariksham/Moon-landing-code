@@ -60,10 +60,11 @@ constexpr F32 kGravityFeedforwardMps2 = static_cast<F32>(kLunarGravityMps2);
     cfg.kp = 0.40F;
     cfg.ki = 0.02F;
     cfg.kd = 0.0F;
-    /* +/-2.0 m/s^2 keeps the commanded tilt inside the allocator's pitch
-     * authority at all vertical-channel commands.                        */
-    cfg.output_min = -2.0F;
-    cfg.output_max = 2.0F;
+    /* +/-2.5 m/s^2: enough braking authority to stop a +3 sigma hot gate
+     * (75 m/s) inside the nominal 1200 m site range (stopping distance
+     * 1125 m), realizable within the allocator's 60 deg pitch authority. */
+    cfg.output_min = -2.5F;
+    cfg.output_max = 2.5F;
     cfg.integrator_min = -0.30F;
     cfg.integrator_max = 0.30F;
     return cfg;
@@ -192,6 +193,9 @@ struct CycleCommands {
  * @param   truth              Current truth state.
  * @param   nav_altitude_m     Navigation altitude estimate, m.
  * @param   nav_velocity_z_mps Navigation vertical-velocity estimate, m/s.
+ * @param   downrange_to_go_m  Signed ground distance to the landing site
+ *                             (truth-derived: the horizontal channel flies
+ *                             perfect navigation until TRN exists), m.
  * @param   dt_s               Control interval, s.
  * @param   gcmd               In/out: last valid guidance command.
  * @param   previous           Commands held from the previous cycle.
@@ -200,8 +204,9 @@ struct CycleCommands {
  */
 [[nodiscard]] CycleCommands RunControlCycle(
     FlightStack& stack, const LanderState3Dof& truth, const F64 nav_altitude_m,
-    const F64 nav_velocity_z_mps, const F64 dt_s, gnc::GuidanceCommand& gcmd,
-    const CycleCommands& previous, U32& fault_count) noexcept {
+    const F64 nav_velocity_z_mps, const F64 downrange_to_go_m, const F64 dt_s,
+    gnc::GuidanceCommand& gcmd, const CycleCommands& previous,
+    U32& fault_count) noexcept {
     CycleCommands cmds{};
     const F32 dt_f32 = static_cast<F32>(dt_s);
     bool faulted = false;
@@ -214,6 +219,7 @@ struct CycleCommands {
 
     /* Guidance: on fault, gcmd is left holding the previous reference.   */
     if (IsFault(stack.guidance.Update(static_cast<F32>(guidance_altitude_m),
+                                      static_cast<F32>(downrange_to_go_m),
                                       &gcmd))) {
         faulted = true;
     }
@@ -291,7 +297,8 @@ Status RunApproachSim(const ApproachScenarioParams& params,
     if (!std::isfinite(params.control_rate_hz) ||
         (params.control_rate_hz <= 0.0) ||
         !std::isfinite(params.max_sim_duration_s) ||
-        (params.max_sim_duration_s <= 0.0)) {
+        (params.max_sim_duration_s <= 0.0) ||
+        !std::isfinite(params.target_downrange_m)) {
         return Status::kErrInvalidParam;
     }
     /* The allocator's thrust constant must describe the actual engine to
@@ -379,8 +386,10 @@ Status RunApproachSim(const ApproachScenarioParams& params,
         }
         prev_velocity_z_mps = truth.velocity_z_mps;
 
+        const F64 downrange_to_go_m =
+            params.target_downrange_m - truth.downrange_m;
         cmds = RunControlCycle(stack, truth, nav_altitude_m, nav_velocity_z_mps,
-                               dt_s, gcmd, cmds,
+                               downrange_to_go_m, dt_s, gcmd, cmds,
                                result_out->controller_fault_count);
 
         if (log_out != nullptr) {
@@ -432,6 +441,8 @@ Status RunApproachSim(const ApproachScenarioParams& params,
         std::fabs(final_state.velocity_x_mps);
     result_out->touchdown_tilt_rad = std::fabs(final_state.pitch_rad);
     result_out->touchdown_downrange_m = final_state.downrange_m;
+    result_out->touchdown_miss_m =
+        std::fabs(params.target_downrange_m - final_state.downrange_m);
     result_out->flight_time_s = time_s;
     result_out->propellant_used_kg =
         initial_propellant_kg - dynamics.GetPropellantRemainingKg();

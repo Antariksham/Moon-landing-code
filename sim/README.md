@@ -101,18 +101,34 @@ entire campaign, so any Monte-Carlo failure is exactly reproducible.
 ./build/sim/selene_sim --mode mc --runs 500 --seed 12345
 ```
 
-The exit code is 0 only if **every** run lands inside all three touchdown
-criteria — CI flies a 300-run campaign on each PR. The 500-run reference
-campaign: 100% safe, worst vertical speed 1.69 m/s (limit 2.0), downrange
-footprint σ ≈ 212 m (dominated by gate dispersion; shrinks when site
-targeting lands).
+The exit code is 0 only if **every** run lands inside all touchdown
+criteria — CI flies a 300-run campaign on each PR.
+
+## Milestone 5 (implemented): landing-site targeting
+
+Guidance now steers to a mission-designed landing site
+(`target_downrange_m`, default 1200 m from the gate) instead of merely
+nulling ground speed: the horizontal command is the most restrictive of a
+range-to-go braking envelope, a near-field linear law, and the pitch-over
+ramp. The vehicle brakes to arrive over the site, then descends
+vertically; landing miss is a first-class touchdown criterion (limit
+50 m).
+
+```bash
+./build/sim/selene_sim --mode 3dof --target-downrange-m 1600
+```
+
+Results: nominal miss ~1 m; the 500-run Monte-Carlo campaign is 100% safe
+with worst-case miss 2.5 m — the footprint collapsed from σ ≈ 212 m
+(velocity-only guidance) to meters. Supporting change: pitch authority
+raised to 60° and the horizontal-acceleration clamp to ±2.5 m/s², sized so
+a +3σ hot gate (75 m/s) can still stop at the site.
 
 ## Next milestones
 
 - YAML loading of `config/landing_params.yaml` (values are currently
   compiled-in defaults that mirror the file).
-- Landing-site targeting (downrange position control) as a precursor to
-  hazard-relative divert — will shrink the Monte-Carlo footprint from
-  hundreds of meters to the target ellipse.
+- Hazard-relative divert: re-target mid-descent to an HDA-selected safe
+  site (the site-targeting law already accepts any reachable target).
 - Accelerometer bias state in the navigation filter; TRN for the
   horizontal channel.

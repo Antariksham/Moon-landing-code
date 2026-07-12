@@ -187,6 +187,28 @@ TEST(ApproachSimClosedLoop, NominalGateLandsSafelyAndReachesSafed) {
     EXPECT_EQ(result.rejected_transition_count, 0U);
     EXPECT_LT(result.propellant_used_kg, params.vehicle.propellant_mass_kg)
         << "Tanks ran dry before touchdown";
+    EXPECT_LT(result.touchdown_miss_m, 5.0)
+        << "Landed " << result.touchdown_miss_m << " m from the site";
+}
+
+TEST(ApproachSimClosedLoop, LandsOnRetargetedSites) {
+    /* Site targeting (milestone 5): different mission-designed targets,
+     * same gate — each must be hit to within meters. All three are inside
+     * the gate's reachability envelope (stopping distance and the
+     * altitude-keyed pitch-over ramp both respected).                    */
+    const F64 targets_m[] = {800.0, 1200.0, 1600.0};
+    for (const F64 target : targets_m) { /* Bounded loop. */
+        ApproachScenarioParams params{};
+        params.target_downrange_m = target;
+
+        ApproachSimResult result{};
+        ASSERT_EQ(RunApproachSim(params, &result, nullptr), Status::kSuccess);
+        EXPECT_TRUE(result.touched_down) << "No touchdown, target " << target;
+        EXPECT_LE(result.touchdown_vertical_speed_mps, kVerticalLimitMps);
+        EXPECT_LT(result.touchdown_miss_m, 10.0)
+            << "Missed target " << target << " by " << result.touchdown_miss_m
+            << " m";
+    }
 }
 
 TEST(ApproachSimClosedLoop, FliesThePitchOverManeuver) {
@@ -285,7 +307,11 @@ TEST(ApproachSimNavigation, RejectsBadSensorConfiguration) {
 
 TEST(ApproachSimClosedLoop, SurvivesDispersedGateConditions) {
     /* Corner cases of the approach handover envelope. Every combination
-     * is inside the vehicle's physical capability; all must land safely. */
+     * must land safely (speeds, tilt); landing ACCURACY is only judged
+     * inside the mission-designed gate envelope (the Monte-Carlo
+     * acceptance test) — several of these deliberately out-of-envelope
+     * gates cannot physically reach the default site and land long or
+     * short instead, which is the correct degraded behavior.             */
     const F64 altitudes_m[] = {1500.0, 2000.0, 2500.0};
     const F64 horizontal_mps[] = {40.0, 60.0, 80.0};
     const F64 vertical_mps[] = {-20.0, -30.0, -40.0};

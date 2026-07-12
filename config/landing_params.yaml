@@ -52,10 +52,11 @@ control:
     kp: 0.40
     ki: 0.02
     kd: 0.0
-    # +/-2.0 m/s^2 keeps the commanded tilt inside the allocator's pitch
-    # authority at all vertical-channel commands.
-    output_min: -2.0
-    output_max: 2.0
+    # +/-2.5 m/s^2: enough braking authority to stop a +3 sigma hot gate
+    # (75 m/s) inside the nominal 1200 m site range, realizable within
+    # the allocator's 60 deg pitch authority.
+    output_min: -2.5
+    output_max: 2.5
     integrator_min: -0.30
     integrator_max: 0.30
   vertical_velocity_pid:
@@ -80,7 +81,9 @@ control:
     integrator_min: -0.10
     integrator_max: 0.10
   thrust_allocator:                # See src/gnc/control/thrust_allocator.hpp
-    max_pitch_deg: 45.0            # Attitude authority for translation loops
+    # Sized so a hot gate (+3 sigma ground speed) can still brake to the
+    # landing site; guidance forces vertical attitude below 150 m anyway.
+    max_pitch_deg: 60.0            # Attitude authority for translation loops
 
 navigation:                        # Vertical channel (milestone 3)
   vertical_nav_filter:             # src/gnc/navigation/vertical_nav_filter.hpp
@@ -106,18 +109,26 @@ approach:                          # 3-DOF handover gate (milestone 2)
   gate_horizontal_velocity_mps: 60.0
   gate_vertical_velocity_mps: -30.0
   gate_pitch_deg: -17.2            # Braking attitude (thrust against travel)
-  # Guidance pitch-over schedule (src/gnc/guidance/descent_guidance.hpp):
-  # allowed ground speed shrinks linearly with altitude and reaches zero
-  # at the pitch-over altitude, forcing a vertical terminal descent.
+  # Landing site, measured downrange from the gate (milestone 5). Mission
+  # design must pick a site the gate energy and the ramp below can reach.
+  target_downrange_m: 1200.0
+  # Guidance horizontal law (src/gnc/guidance/descent_guidance.hpp): the
+  # signed ground-speed command toward the site is the most restrictive
+  # of the range braking envelope, the near-field linear law, and the
+  # altitude-keyed pitch-over ramp (zero ground speed at/below the
+  # pitch-over altitude, forcing a vertical terminal descent).
   pitchover_altitude_m: 150.0
   horizontal_rate_slope_hz: 0.03   # (m/s of ground speed) per m of altitude
   max_horizontal_rate_mps: 80.0
+  horizontal_brake_decel_mps2: 0.8 # Range-to-go envelope deceleration
+  near_field_gain_hz: 0.2          # (m/s) per m of range inside the envelope
 
 terminal_descent:
   target_descent_rate_mps: 1.0     # Constant-velocity final segment
   touchdown_velocity_limit_mps: 2.0
   touchdown_horizontal_limit_mps: 1.0
   touchdown_tilt_limit_deg: 5.0
+  touchdown_miss_limit_m: 50.0     # Site-targeting accuracy criterion
   engine_cutoff_altitude_m: 0.5
 
 monte_carlo:                       # Dispersion campaign (milestone 4)

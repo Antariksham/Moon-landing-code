@@ -103,6 +103,12 @@ struct ApproachScenarioParams {
                                                  the truth vehicle.        */
     NavScenarioParams nav{};                /**< Sensors + flight filter.   */
 
+    F64 target_downrange_m = 1200.0; /**< Landing-site position, measured
+                                          from the gate (downrange 0),
+                                          along +x. Mission design must
+                                          pick a site the gate energy and
+                                          the guidance ramp can reach.     */
+
     F64 control_rate_hz = 50.0;     /**< Flight control loop rate.        */
     F64 max_sim_duration_s = 600.0; /**< Hard bound on the sim loop.      */
 };
@@ -134,6 +140,8 @@ struct ApproachSimResult {
     F64 touchdown_tilt_rad = 0.0;             /**< |pitch| at contact.     */
     F64 touchdown_downrange_m = 0.0;          /**< Ground track flown to contact
                                                    (landing-footprint statistic).   */
+    F64 touchdown_miss_m = 0.0;      /**< |target - contact point| along track
+                                          (site-targeting accuracy).            */
     F64 flight_time_s = 0.0;         /**< Elapsed sim time.                   */
     F64 propellant_used_kg = 0.0;    /**< Propellant consumed.                */
     U32 controller_fault_count = 0U; /**< Non-nominal flight-code statuses

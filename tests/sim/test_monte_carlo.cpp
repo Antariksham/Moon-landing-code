@@ -231,6 +231,8 @@ TEST(MonteCarloAcceptance, DefaultDispersionsAllLandSafely) {
     EXPECT_LT(summary.horizontal_speed_mps.max, 0.5);
     EXPECT_LT(summary.tilt_rad.max, 0.02);
     EXPECT_LT(summary.nav_altitude_error_m.max, 0.5);
+    EXPECT_LT(summary.miss_m.max, 10.0)
+        << "Site targeting degraded: worst miss " << summary.miss_m.max;
 }
 
 }  // namespace

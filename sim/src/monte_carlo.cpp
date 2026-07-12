@@ -116,7 +116,9 @@ class RunningStats {
         std::isfinite(p.criteria.max_horizontal_speed_mps) &&
         (p.criteria.max_horizontal_speed_mps > 0.0) &&
         std::isfinite(p.criteria.max_tilt_rad) &&
-        (p.criteria.max_tilt_rad > 0.0);
+        (p.criteria.max_tilt_rad > 0.0) &&
+        std::isfinite(p.criteria.max_miss_distance_m) &&
+        (p.criteria.max_miss_distance_m > 0.0);
     return criteria_valid && (p.run_count >= 1U) &&
            (p.run_count <= kMaxMonteCarloRuns);
 }
@@ -191,7 +193,8 @@ class RunningStats {
             criteria.max_vertical_speed_mps) &&
            (result.touchdown_horizontal_speed_mps <=
             criteria.max_horizontal_speed_mps) &&
-           (result.touchdown_tilt_rad <= criteria.max_tilt_rad);
+           (result.touchdown_tilt_rad <= criteria.max_tilt_rad) &&
+           (result.touchdown_miss_m <= criteria.max_miss_distance_m);
 }
 
 /** @brief Accumulators for every summary metric, filled run by run. */
@@ -200,6 +203,7 @@ struct CampaignStats {
     RunningStats horizontal_speed;
     RunningStats tilt;
     RunningStats downrange;
+    RunningStats miss;
     RunningStats flight_time;
     RunningStats propellant;
     RunningStats nav_altitude_error;
@@ -245,6 +249,7 @@ Status RunMonteCarlo(const MonteCarloParams& params,
                 result.touchdown_horizontal_speed_mps;
             record.touchdown_tilt_rad = result.touchdown_tilt_rad;
             record.touchdown_downrange_m = result.touchdown_downrange_m;
+            record.touchdown_miss_m = result.touchdown_miss_m;
             record.flight_time_s = result.flight_time_s;
             record.propellant_used_kg = result.propellant_used_kg;
             record.nav_altitude_error_m = result.touchdown_nav_altitude_error_m;
@@ -259,6 +264,7 @@ Status RunMonteCarlo(const MonteCarloParams& params,
             stats.horizontal_speed.Add(result.touchdown_horizontal_speed_mps);
             stats.tilt.Add(result.touchdown_tilt_rad);
             stats.downrange.Add(result.touchdown_downrange_m);
+            stats.miss.Add(result.touchdown_miss_m);
             stats.flight_time.Add(result.flight_time_s);
             stats.propellant.Add(result.propellant_used_kg);
             stats.nav_altitude_error.Add(result.touchdown_nav_altitude_error_m);
@@ -288,6 +294,7 @@ Status RunMonteCarlo(const MonteCarloParams& params,
     summary_out->horizontal_speed_mps = stats.horizontal_speed.Finalize();
     summary_out->tilt_rad = stats.tilt.Finalize();
     summary_out->downrange_m = stats.downrange.Finalize();
+    summary_out->miss_m = stats.miss.Finalize();
     summary_out->flight_time_s = stats.flight_time.Finalize();
     summary_out->propellant_used_kg = stats.propellant.Finalize();
     summary_out->nav_altitude_error_m = stats.nav_altitude_error.Finalize();

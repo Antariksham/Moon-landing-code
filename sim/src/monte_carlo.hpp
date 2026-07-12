@@ -50,6 +50,8 @@ struct LandingCriteria {
                                              touchdown_horizontal_limit_mps.*/
     F64 max_tilt_rad = 0.0873;          /**< config: touchdown_tilt_limit_deg
                                              (5 deg).                      */
+    F64 max_miss_distance_m = 50.0;     /**< config: touchdown_miss_limit_m
+                                             (site-targeting accuracy).    */
 };
 
 /**
@@ -105,6 +107,7 @@ struct MonteCarloRunRecord {
     F64 touchdown_horizontal_speed_mps = 0.0;
     F64 touchdown_tilt_rad = 0.0;
     F64 touchdown_downrange_m = 0.0;
+    F64 touchdown_miss_m = 0.0;
     F64 flight_time_s = 0.0;
     F64 propellant_used_kg = 0.0;
     F64 nav_altitude_error_m = 0.0;
@@ -134,6 +137,8 @@ struct MonteCarloSummary {
     MetricStats tilt_rad{};               /**< Touchdown tilt.               */
     MetricStats downrange_m{};            /**< Landing footprint (along
                                                track).                       */
+    MetricStats miss_m{};                 /**< Distance from the targeted
+                                               site at contact.              */
     MetricStats flight_time_s{};          /**< Gate to touchdown.            */
     MetricStats propellant_used_kg{};     /**< Fuel budget statistic.        */
     MetricStats nav_altitude_error_m{};   /**< Estimator error at contact.   */
