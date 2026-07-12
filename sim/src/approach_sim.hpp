@@ -132,6 +132,8 @@ struct ApproachSimResult {
     F64 touchdown_vertical_speed_mps = 0.0;   /**< |vz| at contact.        */
     F64 touchdown_horizontal_speed_mps = 0.0; /**< |vx| at contact.        */
     F64 touchdown_tilt_rad = 0.0;             /**< |pitch| at contact.     */
+    F64 touchdown_downrange_m = 0.0;          /**< Ground track flown to contact
+                                                   (landing-footprint statistic).   */
     F64 flight_time_s = 0.0;         /**< Elapsed sim time.                   */
     F64 propellant_used_kg = 0.0;    /**< Propellant consumed.                */
     U32 controller_fault_count = 0U; /**< Non-nominal flight-code statuses

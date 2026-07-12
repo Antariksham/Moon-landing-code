@@ -294,10 +294,15 @@ Status RunApproachSim(const ApproachScenarioParams& params,
         (params.max_sim_duration_s <= 0.0)) {
         return Status::kErrInvalidParam;
     }
-    /* The allocator's thrust constant must describe the actual engine, or
-     * every throttle command is scaled wrong.                            */
+    /* The allocator's thrust constant must describe the actual engine to
+     * within calibration tolerance (10%), or every throttle command is
+     * scaled wrong beyond what the velocity loops can absorb. Inside the
+     * tolerance the mismatch is realistic — the flight software carries
+     * the nominal engine model while the real engine is dispersed — and
+     * the loops trim it out.                                             */
     if (std::fabs(static_cast<F64>(params.allocator.max_thrust_n) -
-                  params.vehicle.max_thrust_n) > 0.5) {
+                  params.vehicle.max_thrust_n) >
+        (0.1 * params.vehicle.max_thrust_n)) {
         return Status::kErrInvalidParam;
     }
 
@@ -426,6 +431,7 @@ Status RunApproachSim(const ApproachScenarioParams& params,
     result_out->touchdown_horizontal_speed_mps =
         std::fabs(final_state.velocity_x_mps);
     result_out->touchdown_tilt_rad = std::fabs(final_state.pitch_rad);
+    result_out->touchdown_downrange_m = final_state.downrange_m;
     result_out->flight_time_s = time_s;
     result_out->propellant_used_kg =
         initial_propellant_kg - dynamics.GetPropellantRemainingKg();

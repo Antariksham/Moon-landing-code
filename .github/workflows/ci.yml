@@ -29,6 +29,9 @@ jobs:
       - name: Fly the nominal 3-DOF approach + pitch-over (exit code is the verdict)
         run: ./build/sim/selene_sim --mode 3dof
 
+      - name: Monte-Carlo dispersion campaign (every run must land safely)
+        run: ./build/sim/selene_sim --mode mc --runs 300
+
   format:
     name: clang-format check
     runs-on: ubuntu-latest

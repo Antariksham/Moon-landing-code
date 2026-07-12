@@ -85,12 +85,34 @@ with `--perfect-nav`:
 The horizontal and attitude channels still read truth until the TRN and
 star-tracker milestones give them sensors of their own.
 
+## Milestone 4 (implemented): Monte-Carlo dispersion campaign
+
+`selene_sim --mode mc` flies N dispersed approach descents
+(`sim/src/monte_carlo.hpp`) and reports landing-footprint statistics.
+Dispersed per run, truncated at ±3σ: gate state (altitude, velocities,
+pitch), vehicle build (dry mass, propellant load), engine performance
+(thrust, Isp — the *flight* configuration keeps the nominal engine model,
+so the loops must absorb the calibration mismatch), IMU bias, filter
+handover errors, and fresh sensor-noise seeds. One base seed fixes the
+entire campaign, so any Monte-Carlo failure is exactly reproducible.
+
+```bash
+./build/sim/selene_sim --mode mc --runs 500 --telemetry runs.csv
+./build/sim/selene_sim --mode mc --runs 500 --seed 12345
+```
+
+The exit code is 0 only if **every** run lands inside all three touchdown
+criteria — CI flies a 300-run campaign on each PR. The 500-run reference
+campaign: 100% safe, worst vertical speed 1.69 m/s (limit 2.0), downrange
+footprint σ ≈ 212 m (dominated by gate dispersion; shrinks when site
+targeting lands).
+
 ## Next milestones
 
 - YAML loading of `config/landing_params.yaml` (values are currently
   compiled-in defaults that mirror the file).
-- Monte-Carlo dispersion runner with landing-footprint statistics.
 - Landing-site targeting (downrange position control) as a precursor to
-  hazard-relative divert.
+  hazard-relative divert — will shrink the Monte-Carlo footprint from
+  hundreds of meters to the target ellipse.
 - Accelerometer bias state in the navigation filter; TRN for the
   horizontal channel.

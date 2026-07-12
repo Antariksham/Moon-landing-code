@@ -29,7 +29,8 @@ if(TARGET selene_sim_core)
     target_sources(selene_unit_tests PRIVATE
         sim/test_descent_sim.cpp
         sim/test_approach_sim.cpp
-        sim/test_sensor_models.cpp)
+        sim/test_sensor_models.cpp
+        sim/test_monte_carlo.cpp)
     target_link_libraries(selene_unit_tests PRIVATE selene_sim_core)
 endif()
 

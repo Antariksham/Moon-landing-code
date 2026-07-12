@@ -120,6 +120,25 @@ terminal_descent:
   touchdown_tilt_limit_deg: 5.0
   engine_cutoff_altitude_m: 0.5
 
+monte_carlo:                       # Dispersion campaign (milestone 4)
+  # 1-sigma dispersions, truncated at +/-3 sigma; every generated run is
+  # clamped to physical guardrails. The flight configuration keeps the
+  # NOMINAL engine model — engine dispersion is a calibration mismatch
+  # the control loops must absorb (allowed tolerance: 10%).
+  default_run_count: 200           # CI flies 300
+  sigmas:
+    gate_altitude_m: 100.0
+    gate_horizontal_velocity_mps: 5.0
+    gate_vertical_velocity_mps: 3.0
+    gate_pitch_deg: 2.9            # 0.05 rad
+    dry_mass_kg: 5.0
+    propellant_mass_kg: 5.0
+    engine_max_thrust_n: 50.0      # 2% engine performance
+    specific_impulse_s: 3.0
+    imu_accel_bias_mps2: 0.01      # Around the nominal 0.02 bias
+    nav_handover_altitude_m: 5.0   # Filter seed error, zero-centered
+    nav_handover_velocity_mps: 1.0 # Filter seed error, zero-centered
+
 hazard_avoidance:
   max_site_slope_deg: 10.0
   max_roughness_m: 0.30
