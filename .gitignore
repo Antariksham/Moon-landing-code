@@ -1,6 +1,7 @@
 # Build trees
 build*/
 cmake-build-*/
+wasm/dist/
 
 # Editor / IDE
 .vscode/

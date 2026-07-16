@@ -1,0 +1,81 @@
+# Build the SELENE flight software to WebAssembly and publish the artifacts
+# to the CosmosDaily site repo, so a push to main here automatically updates
+# the lunar-landing simulator page on the website.
+#
+# The publish job needs a repository secret:
+#   SITE_REPO_TOKEN — a fine-grained PAT with `contents: write` access to
+#                     the antariksham/Antariksham repository.
+# Until the secret exists the publish job fails cleanly at checkout and the
+# build job still validates every change.
+
+name: WebAssembly bridge
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "include/**"
+      - "src/**"
+      - "sim/**"
+      - "wasm/**"
+      - ".github/workflows/wasm-publish.yml"
+  pull_request:
+    paths:
+      - "include/**"
+      - "src/**"
+      - "sim/**"
+      - "wasm/**"
+      - ".github/workflows/wasm-publish.yml"
+
+jobs:
+  build:
+    name: Build & smoke-test wasm bridge
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 6.0.3
+
+      - name: Build web artifact + node smoke test
+        run: wasm/build.sh --test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: selene-fsw-wasm
+          path: wasm/dist/
+
+  publish-to-site:
+    name: Publish artifacts to the site repo
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: selene-fsw-wasm
+          path: dist
+
+      - name: Checkout site repo
+        uses: actions/checkout@v4
+        with:
+          repository: antariksham/Antariksham
+          token: ${{ secrets.SITE_REPO_TOKEN }}
+          path: site
+
+      - name: Commit updated wasm to the site
+        run: |
+          mkdir -p site/public/wasm
+          cp dist/selene_fsw.js dist/selene_fsw.wasm site/public/wasm/
+          cd site
+          if git diff --quiet; then
+            echo "wasm artifacts unchanged — nothing to publish"
+            exit 0
+          fi
+          git config user.name  "selene-fsw-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add public/wasm/selene_fsw.js public/wasm/selene_fsw.wasm
+          git commit -m "chore(lunar-sim): update SELENE FSW wasm from moon-landing-code@${GITHUB_SHA::7}"
+          git push origin main
