@@ -26,14 +26,16 @@ mkdir -p "$OUT"
 # Flight library + sim truth models + the Embind bridge. The flight code
 # itself carries no OS dependencies (no heap, no exceptions), so the same
 # sources that fly on the target compile unmodified for wasm.
+#
+# The flight library is globbed, not listed: every .cpp under src/ belongs
+# to it (mirroring the CMake target), and a hand-maintained copy of that
+# list is exactly how milestone 7's horizontal_nav_filter.cpp got left out
+# and broke this build with undefined-symbol link errors. The sim entries
+# stay curated on purpose — sim/src/main.cpp (the CLI entry point) and
+# monte_carlo.cpp must NOT be linked into the web module.
+FLIGHT_SOURCES=("$ROOT"/src/*/*.cpp "$ROOT"/src/*/*/*.cpp)
 SOURCES=(
-    "$ROOT/src/fdir/lls_assert.cpp"
-    "$ROOT/src/fsw/mission_state_machine.cpp"
-    "$ROOT/src/gnc/control/pid_controller.cpp"
-    "$ROOT/src/gnc/control/thrust_allocator.cpp"
-    "$ROOT/src/gnc/guidance/descent_guidance.cpp"
-    "$ROOT/src/gnc/navigation/vertical_nav_filter.cpp"
-    "$ROOT/src/hda/safe_site_selector.cpp"
+    "${FLIGHT_SOURCES[@]}"
     "$ROOT/sim/src/lander_dynamics.cpp"
     "$ROOT/sim/src/lander_dynamics_3dof.cpp"
     "$ROOT/sim/src/sensor_models.cpp"
@@ -42,6 +44,7 @@ SOURCES=(
     "$ROOT/sim/src/approach_sim.cpp"
     "$ROOT/wasm/selene_wasm.cpp"
 )
+echo "== Flight sources: ${FLIGHT_SOURCES[*]#"$ROOT"/}"
 
 COMMON_FLAGS=(
     -O3
