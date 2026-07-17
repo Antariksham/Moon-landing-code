@@ -38,6 +38,8 @@ namespace {
     sigmas.imu_accel_bias_mps2 = 0.0;
     sigmas.nav_altitude_error_m = 0.0;
     sigmas.nav_velocity_error_mps = 0.0;
+    sigmas.nav_downrange_error_m = 0.0;
+    sigmas.nav_velocity_x_error_mps = 0.0;
     return sigmas;
 }
 
@@ -74,6 +76,11 @@ TEST(MonteCarloValidation, RejectsNonPhysicalSigmasAndCriteria) {
 
     params = MonteCarloParams{};
     params.sigmas.imu_accel_bias_mps2 = std::numeric_limits<F64>::quiet_NaN();
+    EXPECT_EQ(RunMonteCarlo(params, &summary, nullptr),
+              Status::kErrInvalidParam);
+
+    params = MonteCarloParams{};
+    params.sigmas.nav_downrange_error_m = -1.0;
     EXPECT_EQ(RunMonteCarlo(params, &summary, nullptr),
               Status::kErrInvalidParam);
 
@@ -234,6 +241,16 @@ TEST(MonteCarloAcceptance, DefaultDispersionsAllLandSafely) {
     EXPECT_LT(summary.nav_altitude_error_m.max, 0.5);
     EXPECT_LT(summary.miss_m.max, 10.0)
         << "Site targeting degraded: worst miss " << summary.miss_m.max;
+
+    /* Horizontal estimator quality across the envelope (milestone 7):
+     * the touchdown position error must stay inside the safe-site
+     * footprint budget (10 m) and the dead-reckoned velocity error must
+     * leave most of the 1 m/s horizontal touchdown budget to control.    */
+    EXPECT_LT(summary.nav_downrange_error_m.max, 9.0)
+        << "Touchdown position error exceeds the footprint budget";
+    EXPECT_LT(summary.nav_velocity_x_error_mps.max, 0.5);
+    EXPECT_EQ(summary.total_trn_rejected_measurements, 0U)
+        << "Clean sensors: the TRN innovation gate should stay quiet";
 
     /* Hazard dispersion must actually exercise the divert machinery, and
      * no run may ever settle onto hazardous terrain.                     */

@@ -3,8 +3,9 @@
  * @brief   Unit tests for the deterministic SIL sensor error models.
  *
  * @details Pins the noise generator to reproducibility and sane statistics,
- *          and the IMU/altimeter models to their documented error
- *          equations (bias, noise scaling, non-negative radar returns).
+ *          and the IMU/altimeter/TRN models to their documented error
+ *          equations (bias, noise scaling, non-negative radar returns,
+ *          the TRN blind floor).
  *
  * @copyright Copyright (c) 2026 Project SELENE Contributors.
  *            Licensed under the Apache License, Version 2.0.
@@ -162,6 +163,76 @@ TEST(AltimeterModel, ReportsConfiguredUpdateDivisor) {
     params.update_divisor = 5U;
     ASSERT_EQ(altimeter.Init(params), Status::kSuccess);
     EXPECT_EQ(altimeter.GetUpdateDivisor(), 5U);
+}
+
+/* ------------------------------------------------------------------ */
+/* TRN model (milestone 7)                                             */
+/* ------------------------------------------------------------------ */
+
+TEST(TrnModel, RejectsNonPhysicalParams) {
+    TrnModel trn;
+    TrnModelParams bad{};
+    bad.noise_std_m = -0.1;
+    EXPECT_EQ(trn.Init(bad), Status::kErrInvalidParam);
+
+    bad = TrnModelParams{};
+    bad.update_divisor = 0U;
+    EXPECT_EQ(trn.Init(bad), Status::kErrInvalidParam);
+
+    bad = TrnModelParams{};
+    bad.min_altitude_m = -1.0;
+    EXPECT_EQ(trn.Init(bad), Status::kErrInvalidParam);
+
+    bad = TrnModelParams{};
+    bad.min_altitude_m = std::numeric_limits<F64>::infinity();
+    EXPECT_EQ(trn.Init(bad), Status::kErrInvalidParam);
+}
+
+TEST(TrnModel, PassesTruthThroughAndIsBlindWhenUninitialized) {
+    TrnModel trn;
+    EXPECT_DOUBLE_EQ(trn.MeasurePosition(750.0), 750.0);
+    EXPECT_FALSE(trn.IsAvailableAt(2000.0));
+}
+
+TEST(TrnModel, NoiseFreeModelIsExactAndSigned) {
+    TrnModel trn;
+    TrnModelParams params{};
+    params.noise_std_m = 0.0;
+    ASSERT_EQ(trn.Init(params), Status::kSuccess);
+    EXPECT_DOUBLE_EQ(trn.MeasurePosition(1200.0), 1200.0);
+    /* A map-relative coordinate is signed: no clamping at zero.           */
+    EXPECT_DOUBLE_EQ(trn.MeasurePosition(-35.0), -35.0);
+}
+
+TEST(TrnModel, BlindFloorGatesAvailability) {
+    TrnModel trn;
+    TrnModelParams params{};
+    params.min_altitude_m = 100.0;
+    ASSERT_EQ(trn.Init(params), Status::kSuccess);
+
+    EXPECT_TRUE(trn.IsAvailableAt(2000.0));
+    EXPECT_TRUE(trn.IsAvailableAt(100.0)); /* Inclusive at the floor.      */
+    EXPECT_FALSE(trn.IsAvailableAt(99.9));
+    EXPECT_FALSE(trn.IsAvailableAt(0.0));
+}
+
+TEST(TrnModel, NoiseIsReproducibleAcrossRuns) {
+    TrnModel a;
+    TrnModel b;
+    const TrnModelParams params{};
+    ASSERT_EQ(a.Init(params), Status::kSuccess);
+    ASSERT_EQ(b.Init(params), Status::kSuccess);
+    for (I32 i = 0; i < 50; ++i) { /* Bounded loop. */
+        EXPECT_DOUBLE_EQ(a.MeasurePosition(600.0), b.MeasurePosition(600.0));
+    }
+}
+
+TEST(TrnModel, ReportsConfiguredUpdateDivisor) {
+    TrnModel trn;
+    TrnModelParams params{};
+    params.update_divisor = 10U;
+    ASSERT_EQ(trn.Init(params), Status::kSuccess);
+    EXPECT_EQ(trn.GetUpdateDivisor(), 10U);
 }
 
 }  // namespace

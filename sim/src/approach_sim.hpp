@@ -1,23 +1,28 @@
 /**
  * @file    approach_sim.hpp
  * @brief   Closed-loop 3-DOF approach + pitch-over + terminal-descent
- *          simulation (SIL milestones 2 + 3).
+ *          simulation (SIL milestones 2 + 3 + 7).
  *
  * @details Flies the full approach phase: the vehicle arrives at the
  *          handover gate with significant horizontal velocity in a braking
  *          attitude, pitches over to vertical as guidance ramps its allowed
  *          ground speed to zero, and completes the same terminal descent
  *          the milestone 1 sim flies — this time with attitude in the loop
- *          and (milestone 3) the vertical channel flying on estimated
- *          state instead of truth.
+ *          and both translation channels flying on estimated state instead
+ *          of truth: the vertical channel (milestone 3) on the altimeter-
+ *          aided filter, the horizontal channel (milestone 7) on the
+ *          TRN-aided, bias-estimating filter.
  *
  *          Flight code under test (all built under the strict flight
  *          flags):
  *            - `lls::gnc::VerticalNavFilter` — altitude/velocity estimate
  *              fused from the noisy IMU + radar-altimeter models.
+ *            - `lls::gnc::HorizontalNavFilter` — downrange/ground-speed/
+ *              accel-bias estimate fused from the noisy IMU + TRN models;
+ *              dead-reckons below the TRN blind floor.
  *            - `lls::gnc::DescentGuidance` — altitude-keyed velocity
  *              references and the pitch-over/terminal/cutoff discretes,
- *              driven by the navigation altitude.
+ *              driven by the navigation altitude and range-to-go.
  *            - `lls::gnc::PidController` x3 — horizontal velocity,
  *              vertical velocity, and pitch attitude loops.
  *            - `lls::gnc::ThrustAllocator` — acceleration command to
@@ -28,10 +33,11 @@
  *
  *          Per 50 Hz cycle:
  *
- *              IMU delta-v (previous step)  -> nav.Predict
- *              altimeter return (10 Hz)     -> nav.UpdateAltitude
- *              guidance(h_nav) -> (vx_cmd, vz_cmd, discretes)
- *              PID_x(vx_cmd, vx) -> ax_cmd      [thrust accel, m/s^2]
+ *              IMU delta-v (previous step)  -> nav_z.Predict, nav_x.Predict
+ *              altimeter return (10 Hz)     -> nav_z.UpdateAltitude
+ *              TRN fix (5 Hz, blind < 100 m)-> nav_x.UpdatePosition
+ *              guidance(h_nav, r_nav) -> (vx_cmd, vz_cmd, discretes)
+ *              PID_x(vx_cmd, vx_nav) -> ax_cmd  [thrust accel, m/s^2]
  *              PID_z(vz_cmd, vz_nav) + g_ff -> az_cmd
  *              allocator(ax_cmd, az_cmd, m) -> (pitch_cmd, throttle)
  *              PID_att(pitch_cmd, pitch) -> RCS torque fraction
@@ -39,10 +45,10 @@
  *          The vertical loop's gravity feedforward carries the static
  *          load, so integrators only absorb modeling error — the same
  *          feedforward-plus-correction doctrine as milestone 1. The
- *          horizontal and attitude channels still read truth state
- *          (perfect navigation) until TRN/star-tracker milestones give
- *          them sensors; the vehicle mass fed to the allocator is truth
- *          (propellant bookkeeping is deterministic on the real vehicle).
+ *          attitude channel still reads truth state (perfect navigation)
+ *          until the star-tracker milestone gives it a sensor; the vehicle
+ *          mass fed to the allocator is truth (propellant bookkeeping is
+ *          deterministic on the real vehicle).
  *
  * @copyright Copyright (c) 2026 Project SELENE Contributors.
  *            Licensed under the Apache License, Version 2.0.
@@ -56,6 +62,7 @@
 #include "fsw/mission_state_machine.hpp"
 #include "gnc/control/thrust_allocator.hpp"
 #include "gnc/guidance/descent_guidance.hpp"
+#include "gnc/navigation/horizontal_nav_filter.hpp"
 #include "gnc/navigation/vertical_nav_filter.hpp"
 #include "hda/safe_site_selector.hpp"
 #include "lander_dynamics_3dof.hpp"
@@ -67,21 +74,22 @@ namespace lls {
 namespace sim {
 
 /**
- * @brief Navigation configuration for the closed-loop run (milestone 3).
+ * @brief Navigation configuration for the closed-loop run
+ *        (milestones 3 + 7).
  *
- * By default the vertical channel flies on the flight
- * `lls::gnc::VerticalNavFilter` fed by the noisy IMU/altimeter models:
- * guidance altitude, the vertical-rate loop's measurement, and the
- * engine-cutoff discrete all use estimated state. The horizontal and
- * attitude channels still read truth (perfect navigation) until the TRN
- * and star-tracker milestones give them sensors of their own.
+ * By default both translation channels fly on flight filters fed by the
+ * noisy sensor models: guidance altitude, guidance range-to-go, both
+ * velocity loops' measurements, and the engine-cutoff discrete all use
+ * estimated state. The attitude channel still reads truth (perfect
+ * navigation) until the star-tracker milestone gives it a sensor of its
+ * own.
  */
 struct NavScenarioParams {
-    bool use_perfect_navigation = false; /**< True: bypass sensors + filter
+    bool use_perfect_navigation = false; /**< True: bypass sensors + filters
                                               and fly on truth (milestone 2
                                               behavior, for A/B runs).     */
 
-    /** Flight filter tuning. The `initial_altitude_m` /
+    /** Vertical flight filter tuning. The `initial_altitude_m` /
      *  `initial_velocity_mps` fields are overwritten by the sim: the
      *  filter is seeded from the gate state plus the offsets below.      */
     gnc::VerticalNavFilterConfig filter{};
@@ -89,8 +97,24 @@ struct NavScenarioParams {
     F64 initial_altitude_error_m = 5.0;   /**< Seed error vs. gate truth.   */
     F64 initial_velocity_error_mps = 1.0; /**< Seed error vs. gate truth.  */
 
-    ImuModelParams imu{};             /**< Accelerometer error model.      */
+    ImuModelParams imu{};             /**< Vertical accelerometer channel. */
     AltimeterModelParams altimeter{}; /**< Radar-altimeter error model.    */
+
+    /** Horizontal flight filter tuning (milestone 7). The
+     *  `initial_downrange_m` / `initial_velocity_mps` fields are
+     *  overwritten by the sim: the filter is seeded from the gate state
+     *  plus the offsets below.                                            */
+    gnc::HorizontalNavFilterConfig horizontal_filter{};
+
+    F64 initial_downrange_error_m = 10.0;   /**< Seed error vs. gate truth. */
+    F64 initial_velocity_x_error_mps = 1.0; /**< Seed error vs. gate truth. */
+
+    /** Horizontal accelerometer channel: same error magnitudes as the
+     *  vertical channel, independent noise stream (aggregate order:
+     *  noise std, bias, seed — see `ImuModelParams`).                     */
+    ImuModelParams imu_x{0.05, 0.02, 0xB4D5E6F708192A3CULL};
+
+    TrnModelParams trn{}; /**< Terrain-relative navigation error model.    */
 };
 
 /**
@@ -162,6 +186,8 @@ struct ApproachTelemetrySample {
     F64 mass_kg = 0.0;
     F64 nav_altitude_m = 0.0;     /**< Filter estimate in the loop.       */
     F64 nav_velocity_z_mps = 0.0; /**< Filter estimate in the loop.       */
+    F64 nav_downrange_m = 0.0;    /**< Filter estimate in the loop.       */
+    F64 nav_velocity_x_mps = 0.0; /**< Filter estimate in the loop.       */
     U8 mission_phase = 0U; /**< `MissionPhase` value, telemetry encoding. */
 };
 
@@ -203,6 +229,22 @@ struct ApproachSimResult {
     F64 touchdown_nav_velocity_error_mps = 0.0; /**< |estimate - truth| at
                                                      sim end (0 when flying
                                                      perfect navigation).  */
+
+    U32 trn_fix_count = 0U; /**< TRN fixes fused by the horizontal filter
+                                 (0 when flying perfect navigation).       */
+    U32 trn_rejected_measurement_count = 0U;      /**< TRN fixes the horizontal
+                                                       filter's innovation gate
+                                                       refused.                 */
+    F64 touchdown_nav_downrange_error_m = 0.0;    /**< |estimate - truth| at
+                                                       sim end (0 when flying
+                                                       perfect navigation). */
+    F64 touchdown_nav_velocity_x_error_mps = 0.0; /**< |estimate - truth| at
+                                                       sim end (0 when flying
+                                                       perfect navigation). */
+    F64 touchdown_nav_bias_error_mps2 = 0.0;      /**< |estimated - injected|
+                                                       horizontal accel bias at
+                                                       sim end (0 when flying
+                                                       perfect navigation).     */
 };
 
 /** @brief Fixed-capacity telemetry recorder (rule #1: no heap, even here). */

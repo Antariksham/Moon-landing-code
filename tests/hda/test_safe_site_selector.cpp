@@ -192,7 +192,7 @@ TEST(SafeSiteSelectorDecision, DivertsToNearestSafeSite) {
 
     SiteSurvey survey = MakeStandardSurvey();
     /* Hazard from 1160 to 1240: the nominal (1200) is inside. The nearest
-     * safe SITE must also keep its whole footprint (radius 4 m) clear of
+     * safe SITE must also keep its whole footprint (radius 10 m) clear of
      * the hazard edge.                                                   */
     AddHazardInterval(&survey, 1160.0F, 1240.0F);
     SiteSelection selection{};
@@ -201,10 +201,10 @@ TEST(SafeSiteSelectorDecision, DivertsToNearestSafeSite) {
     EXPECT_FALSE(selection.nominal_is_safe);
     EXPECT_TRUE(selection.diverted);
 
-    /* Candidates at 1156 (down) and 1244 (up) are the first with clean
-     * footprints; 1244 is equally far (44 m) as 1156 — the tie breaks
-     * toward the lower downrange.                                        */
-    EXPECT_FLOAT_EQ(selection.target_downrange_m, 1152.0F);
+    /* Candidates at 1148 (down) and 1252 (up) are the first whose whole
+     * 10 m footprints clear the hazardous stations; both are 52 m from
+     * the nominal — the tie breaks toward the lower downrange.           */
+    EXPECT_FLOAT_EQ(selection.target_downrange_m, 1148.0F);
 }
 
 TEST(SafeSiteSelectorDecision, RespectsTheDivertEnvelope) {
@@ -262,9 +262,10 @@ TEST(SafeSiteSelectorDecision, UnsurveyedNominalIsConservativelyUnsafe) {
               Status::kSuccess);
     EXPECT_FALSE(selection.nominal_is_safe);
     EXPECT_TRUE(selection.diverted);
-    /* Nearest certified station: the top of the surveyed span (minus the
-     * footprint-coverage margin).                                        */
-    EXPECT_NEAR(selection.target_downrange_m, 1398.0F, 4.0F);
+    /* Nearest certified station: the top of the surveyed span minus the
+     * footprint-coverage margin (radius/2 = 5 m of surveyed reach needed
+     * on the high side puts the highest certifiable station at 1392).    */
+    EXPECT_FLOAT_EQ(selection.target_downrange_m, 1392.0F);
 }
 
 }  // namespace

@@ -98,11 +98,37 @@ navigation:                        # Vertical channel (milestone 3)
   handover_error:                  # Filter seed error vs. truth at the gate
     altitude_m: 5.0
     velocity_mps: 1.0
+
+  # Horizontal channel (milestone 7):
+  # src/gnc/navigation/horizontal_nav_filter.hpp — 3-state Kalman filter
+  # (downrange, ground speed, accelerometer bias): IMU-acceleration
+  # predict at the control rate, TRN position update at the sensor rate.
+  # The bias state matters because TRN goes blind below its minimum
+  # altitude and the filter must dead-reckon the terminal descent on the
+  # IMU alone: an unestimated 0.02 m/s^2 bias would integrate to ~1 m/s
+  # of phantom ground speed — most of the touchdown budget.
+  horizontal_nav_filter:
+    initial_downrange_std_m: 10.0
+    initial_velocity_std_mps: 2.0
+    initial_bias_std_mps2: 0.05    # Bias state is seeded at zero
+    accel_noise_std_mps2: 0.1      # Process noise driver
+    bias_walk_std_mps2: 0.001      # Bias random-walk growth per sqrt(s)
+    trn_noise_std_m: 5.0           # Measurement noise (R)
+    innovation_gate_sigma: 5.0     # Reject fixes beyond this many sigma
+  horizontal_handover_error:       # Filter seed error vs. truth at the gate
+    downrange_m: 10.0
+    velocity_mps: 1.0
+
   sensors:                         # SIL error models (sim/src/sensor_models.hpp)
-    imu_accel_noise_std_mps2: 0.05 # White noise per 50 Hz sample
-    imu_accel_bias_mps2: 0.02      # Constant turn-on bias (unestimated)
+    imu_accel_noise_std_mps2: 0.05 # White noise per 50 Hz sample, per axis
+    imu_accel_bias_mps2: 0.02      # Constant turn-on bias, per axis
+                                   # (vertical: unestimated; horizontal:
+                                   # estimated by the flight filter)
     altimeter_noise_std_m: 0.2     # White noise per return
     altimeter_rate_hz: 10          # Return every 5th control cycle
+    trn_noise_std_m: 5.0           # White noise per TRN position fix
+    trn_rate_hz: 5                 # Fix every 10th control cycle
+    trn_min_altitude_m: 100.0      # TRN is blind below this altitude
 
 approach:                          # 3-DOF handover gate (milestone 2)
   gate_altitude_m: 2000.0
@@ -146,9 +172,12 @@ monte_carlo:                       # Dispersion campaign (milestone 4)
     propellant_mass_kg: 5.0
     engine_max_thrust_n: 50.0      # 2% engine performance
     specific_impulse_s: 3.0
-    imu_accel_bias_mps2: 0.01      # Around the nominal 0.02 bias
+    imu_accel_bias_mps2: 0.01      # Around the nominal 0.02 bias; drawn
+                                   # independently per accelerometer axis
     nav_handover_altitude_m: 5.0   # Filter seed error, zero-centered
     nav_handover_velocity_mps: 1.0 # Filter seed error, zero-centered
+    nav_handover_downrange_m: 10.0 # Horizontal seed error, zero-centered
+    nav_handover_velocity_x_mps: 1.0 # Horizontal seed error, zero-centered
   hazards:                         # Terrain-hazard dispersion (milestone 6)
     hazard_probability: 0.5        # Fraction of runs with a zone near the site
     zone_length_m: 60.0
@@ -160,7 +189,13 @@ hazard_avoidance:                  # Milestone 6 (src/hda/safe_site_selector.hpp
   # uniformly inside the limits.
   max_site_slope_deg: 10.0
   max_roughness_m: 0.30
-  min_safe_site_radius_m: 4.0
+  # The footprint must budget for the landing dispersion: the vehicle
+  # lands where NAVIGATION thinks the site is (milestone 7), so the
+  # verified radius has to absorb the touchdown position error (< 8 m
+  # worst case in the 500-run campaign). The original 4 m footprint
+  # demonstrably put diverted landings onto adjacent hazards once the
+  # horizontal channel flew on estimated state.
+  min_safe_site_radius_m: 10.0
   max_divert_distance_m: 300.0
   # SIL survey geometry (sim/src/approach_sim.hpp): a one-shot terrain
   # scan at the decision gate; station spacing must not exceed the

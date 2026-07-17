@@ -192,17 +192,18 @@ void PrintUsage(const char* prog) {
                  "velocity_z_mps,velocity_x_cmd_mps,velocity_z_cmd_mps,"
                  "pitch_rad,pitch_cmd_rad,throttle_frac,torque_frac,"
                  "mass_kg,nav_altitude_m,nav_velocity_z_mps,"
-                 "mission_phase\n");
+                 "nav_downrange_m,nav_velocity_x_mps,mission_phase\n");
     for (lls::U32 i = 0U; i < log.GetCount(); ++i) { /* Bounded loop. */
         const lls::sim::ApproachTelemetrySample& s = log.GetSample(i);
         std::fprintf(file,
                      "%.3f,%.2f,%.3f,%.4f,%.4f,%.4f,%.4f,%.5f,%.5f,%.4f,"
-                     "%.4f,%.3f,%.3f,%.4f,%u\n",
+                     "%.4f,%.3f,%.3f,%.4f,%.2f,%.4f,%u\n",
                      s.time_s, s.downrange_m, s.altitude_m, s.velocity_x_mps,
                      s.velocity_z_mps, s.velocity_x_cmd_mps,
                      s.velocity_z_cmd_mps, s.pitch_rad, s.pitch_cmd_rad,
                      s.throttle_frac, s.torque_frac, s.mass_kg,
-                     s.nav_altitude_m, s.nav_velocity_z_mps,
+                     s.nav_altitude_m, s.nav_velocity_z_mps, s.nav_downrange_m,
+                     s.nav_velocity_x_mps,
                      static_cast<unsigned>(s.mission_phase));
     }
     static_cast<void>(std::fclose(file));
@@ -349,11 +350,21 @@ void PrintUsage(const char* prog) {
         std::printf("Navigation:        perfect (sensors bypassed)\n");
     } else {
         std::printf(
-            "Navigation:        filter in the loop; touchdown estimate "
-            "error %.2f m / %.2f m/s, %u gated returns\n",
+            "Navigation:        filters in the loop; touchdown estimate "
+            "error %.2f m / %.2f m/s vertical, %.2f m / %.2f m/s "
+            "horizontal; %u gated returns\n",
             result.touchdown_nav_altitude_error_m,
             result.touchdown_nav_velocity_error_mps,
-            static_cast<unsigned>(result.nav_rejected_measurement_count));
+            result.touchdown_nav_downrange_error_m,
+            result.touchdown_nav_velocity_x_error_mps,
+            static_cast<unsigned>(result.nav_rejected_measurement_count +
+                                  result.trn_rejected_measurement_count));
+        std::printf(
+            "TRN:               %u fixes fused (blind below %.0f m); "
+            "accel-bias estimate error %.4f m/s^2\n",
+            static_cast<unsigned>(result.trn_fix_count),
+            params.nav.trn.min_altitude_m,
+            result.touchdown_nav_bias_error_mps2);
     }
     std::printf("Verdict:           %s\n",
                 safe ? "SAFE LANDING" : "LOSS OF VEHICLE");
@@ -373,12 +384,14 @@ void PrintUsage(const char* prog) {
                  "vertical_speed_mps,horizontal_speed_mps,tilt_rad,"
                  "downrange_m,miss_m,flight_time_s,propellant_used_kg,"
                  "nav_altitude_error_m,nav_velocity_error_mps,"
-                 "controller_faults,nav_rejected_measurements\n");
+                 "nav_downrange_error_m,nav_velocity_x_error_mps,"
+                 "controller_faults,nav_rejected_measurements,"
+                 "trn_fixes,trn_rejected_measurements\n");
     for (lls::U32 i = 0U; i < log.GetCount(); ++i) { /* Bounded loop. */
         const lls::sim::MonteCarloRunRecord& r = log.GetRecord(i);
         std::fprintf(file,
                      "%u,%u,%.2f,%.3f,%.3f,%.4f,%u,%.4f,%.4f,%.5f,%.2f,"
-                     "%.2f,%.2f,%.3f,%.4f,%.4f,%u,%u\n",
+                     "%.2f,%.2f,%.3f,%.4f,%.4f,%.4f,%.4f,%u,%u,%u,%u\n",
                      static_cast<unsigned>(r.run_index), r.safe ? 1U : 0U,
                      r.gate_altitude_m, r.gate_velocity_x_mps,
                      r.gate_velocity_z_mps, r.gate_pitch_rad,
@@ -387,8 +400,11 @@ void PrintUsage(const char* prog) {
                      r.touchdown_downrange_m, r.touchdown_miss_m,
                      r.flight_time_s, r.propellant_used_kg,
                      r.nav_altitude_error_m, r.nav_velocity_error_mps,
+                     r.nav_downrange_error_m, r.nav_velocity_x_error_mps,
                      static_cast<unsigned>(r.controller_fault_count),
-                     static_cast<unsigned>(r.nav_rejected_measurement_count));
+                     static_cast<unsigned>(r.nav_rejected_measurement_count),
+                     static_cast<unsigned>(r.trn_fix_count),
+                     static_cast<unsigned>(r.trn_rejected_measurement_count));
     }
     static_cast<void>(std::fclose(file));
     return true;
@@ -457,9 +473,14 @@ void PrintMetric(const char* label, const lls::sim::MetricStats& stats,
     PrintMetric("Propellant:", summary.propellant_used_kg, "kg");
     PrintMetric("Nav alt error:", summary.nav_altitude_error_m, "m");
     PrintMetric("Nav vel error:", summary.nav_velocity_error_mps, "m/s");
-    std::printf("Controller faults: %u total; gated altimeter returns: %u\n",
-                static_cast<unsigned>(summary.total_controller_faults),
-                static_cast<unsigned>(summary.total_nav_rejected_measurements));
+    PrintMetric("Nav pos error:", summary.nav_downrange_error_m, "m");
+    PrintMetric("Nav vx error:", summary.nav_velocity_x_error_mps, "m/s");
+    std::printf(
+        "Controller faults: %u total; gated altimeter returns: %u; "
+        "gated TRN fixes: %u\n",
+        static_cast<unsigned>(summary.total_controller_faults),
+        static_cast<unsigned>(summary.total_nav_rejected_measurements),
+        static_cast<unsigned>(summary.total_trn_rejected_measurements));
     std::printf(
         "HDA:               %u hazard runs, %u diverts, %u hazard "
         "landings, %u no-safe-site\n",

@@ -8,8 +8,9 @@
  *          closed-loop 3-DOF descent the SIL simulator flies —
  *          `lls::sim::RunApproachSim` with the real flight stack
  *          (`MissionStateMachine`, `DescentGuidance`, `PidController`,
- *          `ThrustAllocator`, `VerticalNavFilter`, `SafeSiteSelector`)
- *          in the loop — and records the 50 Hz telemetry log.
+ *          `ThrustAllocator`, `VerticalNavFilter`, `HorizontalNavFilter`,
+ *          `SafeSiteSelector`) in the loop — and records the 50 Hz
+ *          telemetry log.
  *
  *          The frontend then pulls interpolated state vectors from the
  *          log at its own render rate (60 fps) via `getStateAtTime()`.
@@ -61,6 +62,8 @@ struct WebSimState {
     double massKg = 0.0;
     double navAltitudeM = 0.0;
     double navVelocityZMps = 0.0;
+    double navDownrangeM = 0.0;
+    double navVelocityXMps = 0.0;
     int missionPhase = 0;
     bool touchedDown = false;
 };
@@ -85,6 +88,9 @@ struct WebSimResult {
     int controllerFaultCount = 0;
     double navAltitudeErrorM = 0.0;
     double navVelocityErrorMps = 0.0;
+    double navDownrangeErrorM = 0.0;
+    double navVelocityXErrorMps = 0.0;
+    int trnFixCount = 0;
 };
 
 /* Mission limits mirrored from sim/src/main.cpp (the CLI verdict). */
@@ -165,6 +171,8 @@ WebSimState sampleToState(const lls::sim::ApproachTelemetrySample& s) {
     out.massKg = s.mass_kg;
     out.navAltitudeM = s.nav_altitude_m;
     out.navVelocityZMps = s.nav_velocity_z_mps;
+    out.navDownrangeM = s.nav_downrange_m;
+    out.navVelocityXMps = s.nav_velocity_x_mps;
     out.missionPhase = static_cast<int>(s.mission_phase);
     return out;
 }
@@ -185,8 +193,7 @@ WebSimState getStateAtTime(const double t_s) {
     const lls::U32 count = g_log.GetCount();
     const double t = std::max(0.0, t_s);
     const double idx_f = t / g_dt_s;
-    const lls::U32 i0 =
-        std::min(static_cast<lls::U32>(idx_f), count - 1U);
+    const lls::U32 i0 = std::min(static_cast<lls::U32>(idx_f), count - 1U);
 
     if (i0 >= (count - 1U)) {
         out = sampleToState(g_log.GetSample(count - 1U));
@@ -197,16 +204,14 @@ WebSimState getStateAtTime(const double t_s) {
             out.velocityXMps = 0.0;
             out.velocityZMps = 0.0;
             out.throttleFrac = 0.0;
-            out.missionPhase =
-                static_cast<int>(g_result.final_phase);
+            out.missionPhase = static_cast<int>(g_result.final_phase);
         }
         return out;
     }
 
     const lls::sim::ApproachTelemetrySample& a = g_log.GetSample(i0);
     const lls::sim::ApproachTelemetrySample& b = g_log.GetSample(i0 + 1U);
-    const double f =
-        std::clamp(idx_f - static_cast<double>(i0), 0.0, 1.0);
+    const double f = std::clamp(idx_f - static_cast<double>(i0), 0.0, 1.0);
     const auto lerp = [f](const double x, const double y) {
         return x + ((y - x) * f);
     };
@@ -222,6 +227,8 @@ WebSimState getStateAtTime(const double t_s) {
     out.massKg = lerp(a.mass_kg, b.mass_kg);
     out.navAltitudeM = lerp(a.nav_altitude_m, b.nav_altitude_m);
     out.navVelocityZMps = lerp(a.nav_velocity_z_mps, b.nav_velocity_z_mps);
+    out.navDownrangeM = lerp(a.nav_downrange_m, b.nav_downrange_m);
+    out.navVelocityXMps = lerp(a.nav_velocity_x_mps, b.nav_velocity_x_mps);
     return out;
 }
 
@@ -236,16 +243,14 @@ WebSimResult getResult() {
     out.touchedDown = g_result.touched_down;
     out.safeLanding =
         g_result.touched_down &&
-        (g_result.touchdown_vertical_speed_mps <=
-         kTouchdownVelocityLimitMps) &&
+        (g_result.touchdown_vertical_speed_mps <= kTouchdownVelocityLimitMps) &&
         (g_result.touchdown_horizontal_speed_mps <=
          kTouchdownHorizontalLimitMps) &&
         (tilt_deg <= kTouchdownTiltLimitDeg) &&
         (g_result.touchdown_miss_m <= kTouchdownMissLimitM) &&
         !g_result.landed_on_hazard;
     out.touchdownVerticalSpeedMps = g_result.touchdown_vertical_speed_mps;
-    out.touchdownHorizontalSpeedMps =
-        g_result.touchdown_horizontal_speed_mps;
+    out.touchdownHorizontalSpeedMps = g_result.touchdown_horizontal_speed_mps;
     out.touchdownTiltDeg = tilt_deg;
     out.touchdownMissM = g_result.touchdown_miss_m;
     out.finalTargetDownrangeM = g_result.final_target_downrange_m;
@@ -260,6 +265,9 @@ WebSimResult getResult() {
         static_cast<int>(g_result.controller_fault_count);
     out.navAltitudeErrorM = g_result.touchdown_nav_altitude_error_m;
     out.navVelocityErrorMps = g_result.touchdown_nav_velocity_error_mps;
+    out.navDownrangeErrorM = g_result.touchdown_nav_downrange_error_m;
+    out.navVelocityXErrorMps = g_result.touchdown_nav_velocity_x_error_mps;
+    out.trnFixCount = static_cast<int>(g_result.trn_fix_count);
     return out;
 }
 
@@ -289,6 +297,8 @@ EMSCRIPTEN_BINDINGS(selene_fsw) {
         .field("massKg", &WebSimState::massKg)
         .field("navAltitudeM", &WebSimState::navAltitudeM)
         .field("navVelocityZMps", &WebSimState::navVelocityZMps)
+        .field("navDownrangeM", &WebSimState::navDownrangeM)
+        .field("navVelocityXMps", &WebSimState::navVelocityXMps)
         .field("missionPhase", &WebSimState::missionPhase)
         .field("touchedDown", &WebSimState::touchedDown);
 
@@ -302,8 +312,7 @@ EMSCRIPTEN_BINDINGS(selene_fsw) {
                &WebSimResult::touchdownHorizontalSpeedMps)
         .field("touchdownTiltDeg", &WebSimResult::touchdownTiltDeg)
         .field("touchdownMissM", &WebSimResult::touchdownMissM)
-        .field("finalTargetDownrangeM",
-               &WebSimResult::finalTargetDownrangeM)
+        .field("finalTargetDownrangeM", &WebSimResult::finalTargetDownrangeM)
         .field("hdaDiverted", &WebSimResult::hdaDiverted)
         .field("hdaDivertDistanceM", &WebSimResult::hdaDivertDistanceM)
         .field("hdaNoSafeSite", &WebSimResult::hdaNoSafeSite)
@@ -311,10 +320,12 @@ EMSCRIPTEN_BINDINGS(selene_fsw) {
         .field("flightTimeS", &WebSimResult::flightTimeS)
         .field("propellantUsedKg", &WebSimResult::propellantUsedKg)
         .field("finalPhase", &WebSimResult::finalPhase)
-        .field("controllerFaultCount",
-               &WebSimResult::controllerFaultCount)
+        .field("controllerFaultCount", &WebSimResult::controllerFaultCount)
         .field("navAltitudeErrorM", &WebSimResult::navAltitudeErrorM)
-        .field("navVelocityErrorMps", &WebSimResult::navVelocityErrorMps);
+        .field("navVelocityErrorMps", &WebSimResult::navVelocityErrorMps)
+        .field("navDownrangeErrorM", &WebSimResult::navDownrangeErrorM)
+        .field("navVelocityXErrorMps", &WebSimResult::navVelocityXErrorMps)
+        .field("trnFixCount", &WebSimResult::trnFixCount);
 
     emscripten::function("runScenario", &runScenario);
     emscripten::function("runDefaultScenario", &runDefaultScenario);
