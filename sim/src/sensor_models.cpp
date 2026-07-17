@@ -109,5 +109,35 @@ U32 AltimeterModel::GetUpdateDivisor() const noexcept {
     return params_.update_divisor;
 }
 
+Status TrnModel::Init(const TrnModelParams& params) noexcept {
+    const bool valid =
+        std::isfinite(params.noise_std_m) && (params.noise_std_m >= 0.0) &&
+        (params.update_divisor >= 1U) && std::isfinite(params.min_altitude_m) &&
+        (params.min_altitude_m >= 0.0);
+    if (!valid) {
+        is_initialized_ = false;
+        return Status::kErrInvalidParam;
+    }
+    params_ = params;
+    noise_.Seed(params.noise_seed);
+    is_initialized_ = true;
+    return Status::kSuccess;
+}
+
+bool TrnModel::IsAvailableAt(const F64 true_altitude_m) const noexcept {
+    return is_initialized_ && (true_altitude_m >= params_.min_altitude_m);
+}
+
+F64 TrnModel::MeasurePosition(const F64 true_downrange_m) noexcept {
+    if (!is_initialized_) {
+        return true_downrange_m;
+    }
+    return true_downrange_m + (params_.noise_std_m * noise_.NextGaussian());
+}
+
+U32 TrnModel::GetUpdateDivisor() const noexcept {
+    return params_.update_divisor;
+}
+
 }  // namespace sim
 }  // namespace lls

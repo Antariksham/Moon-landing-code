@@ -17,6 +17,7 @@ add_executable(selene_unit_tests
     gnc/test_pid_controller.cpp
     gnc/test_descent_guidance.cpp
     gnc/test_thrust_allocator.cpp
+    gnc/test_horizontal_nav_filter.cpp
     gnc/test_vertical_nav_filter.cpp
     hda/test_safe_site_selector.cpp
     fsw/test_mission_state_machine.cpp)

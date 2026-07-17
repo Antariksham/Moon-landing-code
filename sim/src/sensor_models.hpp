@@ -1,15 +1,22 @@
 /**
  * @file    sensor_models.hpp
- * @brief   Deterministic sensor error models for the SIL sim (milestone 3).
+ * @brief   Deterministic sensor error models for the SIL sim
+ *          (milestones 3 + 7).
  *
  * @details Corrupts truth quantities the way the real sensors will, so the
- *          flight navigation filter earns its keep in the loop:
+ *          flight navigation filters earn their keep in the loop:
  *
  *            - `ImuModel` — accelerometer channel: constant bias plus
  *              white Gaussian noise per sample.
  *            - `AltimeterModel` — nadir radar altimeter: white Gaussian
  *              noise per return (bias-free; radar altimeter biases are
  *              calibrated out on the ground).
+ *            - `TrnModel` — terrain-relative navigation position fixes:
+ *              white Gaussian noise per fix, and no fixes at all below a
+ *              minimum altitude (near the ground the camera footprint
+ *              shrinks and terrain features blur out of the map's
+ *              resolution — real TRN goes blind, and the filter must
+ *              dead-reckon the rest of the way down).
  *
  *          All randomness comes from `GaussianNoiseGenerator`, a
  *          fixed-seed xorshift64* PRNG with a Box-Muller transform: runs
@@ -147,6 +154,63 @@ class AltimeterModel {
 
  private:
     AltimeterModelParams params_{};
+    GaussianNoiseGenerator noise_{};
+    bool is_initialized_ = false;
+};
+
+/** @brief Terrain-relative navigation error parameters (milestone 7). */
+struct TrnModelParams {
+    F64 noise_std_m = 5.0;      /**< White noise per position fix.           */
+    U32 update_divisor = 10U;   /**< Fix every N control cycles (10 at
+                                     50 Hz = 5 Hz TRN), >= 1.               */
+    F64 min_altitude_m = 100.0; /**< No fixes below this altitude: the
+                                     sensor is blind near the ground.      */
+    U64 noise_seed = 0x7A5C3E1B9D8F6042ULL; /**< PRNG seed for this run.   */
+};
+
+/**
+ * @brief TRN position sensor: truth downrange in, noisy map-relative fix
+ *        out — when the sensor can see at all.
+ */
+class TrnModel {
+ public:
+    TrnModel() noexcept = default;
+
+    /**
+     * @brief   Configure the error model.
+     *
+     * @param   params  Noise standard deviation must be finite and >= 0;
+     *                  the update divisor must be >= 1; the blind-floor
+     *                  altitude must be finite and >= 0.
+     *
+     * @retval  Status::kSuccess          Model ready.
+     * @retval  Status::kErrInvalidParam  A parameter is out of range.
+     */
+    [[nodiscard]] Status Init(const TrnModelParams& params) noexcept;
+
+    /**
+     * @brief   Whether the sensor can produce a fix at this altitude.
+     * @param   true_altitude_m  Truth altitude from the dynamics.
+     * @return  `true` at or above the blind-floor altitude (`false` when
+     *          `Init()` has not succeeded).
+     */
+    [[nodiscard]] bool IsAvailableAt(F64 true_altitude_m) const noexcept;
+
+    /**
+     * @brief   Corrupt one true downrange-position sample.
+     * @param   true_downrange_m  Truth value from the dynamics.
+     * @return  Measurement = truth + white noise (a map-relative position
+     *          coordinate is signed — no clamping). Returns the truth
+     *          unmodified if `Init()` has not succeeded. Availability is
+     *          the caller's check (`IsAvailableAt()`).
+     */
+    [[nodiscard]] F64 MeasurePosition(F64 true_downrange_m) noexcept;
+
+    /** @brief Control cycles between fixes (from the configuration). */
+    [[nodiscard]] U32 GetUpdateDivisor() const noexcept;
+
+ private:
+    TrnModelParams params_{};
     GaussianNoiseGenerator noise_{};
     bool is_initialized_ = false;
 };

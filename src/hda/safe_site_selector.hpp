@@ -59,8 +59,19 @@ namespace hda {
 struct SafeSiteSelectorConfig {
     F32 max_slope_deg = 10.0F;          /**< Landing-gear tip-over limit.    */
     F32 max_roughness_m = 0.30F;        /**< Clearance under the deck.       */
-    F32 min_safe_site_radius_m = 4.0F;  /**< Footprint half-width that must
-                                             be uniformly safe, > 0.        */
+    F32 min_safe_site_radius_m = 10.0F; /**< Footprint half-width that must
+                                             be uniformly safe, > 0. Must
+                                             budget for the landing
+                                             dispersion: the vehicle lands
+                                             where NAVIGATION thinks the
+                                             site is, so the verified
+                                             footprint has to absorb the
+                                             touchdown position error
+                                             (milestone 7 campaign: < 8 m
+                                             worst case) — a 4 m footprint
+                                             demonstrably put diverted
+                                             landings onto adjacent
+                                             hazards.                       */
     F32 max_divert_distance_m = 300.0F; /**< Guidance/propellant divert
                                              envelope, > 0.                */
 };

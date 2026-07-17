@@ -146,11 +146,57 @@ hazard zones randomly near the site in half its runs: in the 500-run
 reference campaign, 237 runs drew a hazard, 155 required a divert, and
 **zero** runs touched down on hazardous terrain — all 500 safe.
 
+## Milestone 7 (implemented): terrain-relative navigation
+
+The horizontal channel no longer reads truth state. A second flight
+filter (`src/gnc/navigation/horizontal_nav_filter.hpp` — 3-state Kalman
+filter: downrange, ground speed, accelerometer bias) estimates the
+horizontal state from:
+
+- **Horizontal IMU channel** (`src/sensor_models.hpp`) — accelerometer
+  delta-v with constant bias + white noise, independent noise stream from
+  the vertical channel, at the 50 Hz control rate.
+- **TRN model** — map-relative downrange position fixes with white noise
+  at 5 Hz, and **no fixes at all below 100 m altitude**: near the ground
+  real TRN loses its feature lock, so the filter must dead-reckon the
+  entire terminal descent on the IMU alone.
+
+The TRN blackout is why the filter carries a bias state (the roadmap's
+"accelerometer bias state" milestone, delivered where it is structurally
+required): an unestimated 0.02 m/s² bias integrates to ~1 m/s of phantom
+ground speed over the blind final descent — most of the 1 m/s horizontal
+touchdown budget — and the control loop would faithfully chase it.
+Estimated while TRN can see, the bias correction holds through the
+blackout: campaign-wide touchdown ground-speed estimate error stays
+under 0.32 m/s.
+
+Guidance range-to-go and the horizontal-velocity loop's measurement now
+both come from the estimate; `--perfect-nav` still flies the truth-state
+baseline. Landing on estimated position exposed a real systems coupling:
+**the HDA safe-site footprint must budget for navigation execution
+error.** With the original 4 m verified footprint, 4 of 500 Monte-Carlo
+runs landed on hazards adjacent to their diverted site (touchdown
+position error up to ~7 m). The footprint
+(`hazard_avoidance.min_safe_site_radius_m`) is now 10 m, sized to cover
+the campaign's worst-case landing dispersion — and the reference
+campaign is back to **all 500 runs safe** (166 diverts, zero hazard
+landings), with worst-case miss 7.5 m against the 50 m criterion.
+
+```bash
+./build/sim/selene_sim --mode 3dof            # both filters in the loop
+./build/sim/selene_sim --mode 3dof --perfect-nav
+```
+
+The Monte-Carlo campaign now also disperses the horizontal-channel
+handover errors, an independent horizontal IMU bias, and fresh TRN noise
+seeds per run.
+
 ## Next milestones
 
 - YAML loading of `config/landing_params.yaml` (values are currently
   compiled-in defaults that mirror the file).
 - LIDAR sensor model + terrain estimation (HDA currently surveys truth
   terrain), and 2-D site maps.
-- Accelerometer bias state in the navigation filter; TRN for the
-  horizontal channel.
+- Star-tracker/gyro sensor models and attitude estimation (the attitude
+  channel still reads truth); accelerometer bias state in the vertical
+  filter.

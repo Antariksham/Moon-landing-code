@@ -151,9 +151,26 @@ constexpr F32 kGravityFeedforwardMps2 = static_cast<F32>(kLunarGravityMps2);
     return cfg;
 }
 
+/**
+ * @brief   Compose the horizontal flight filter's configuration.
+ *
+ * @details Seeded from the gate state (the gate is downrange 0 by
+ *          definition) plus the configured navigation-handover errors.
+ */
+[[nodiscard]] gnc::HorizontalNavFilterConfig MakeHorizontalNavFilterConfig(
+    const ApproachScenarioParams& params) noexcept {
+    gnc::HorizontalNavFilterConfig cfg = params.nav.horizontal_filter;
+    cfg.initial_downrange_m =
+        static_cast<F32>(params.nav.initial_downrange_error_m);
+    cfg.initial_velocity_mps = static_cast<F32>(
+        params.gate.velocity_x_mps + params.nav.initial_velocity_x_error_mps);
+    return cfg;
+}
+
 /** @brief The flight components in the loop, initialized as one unit. */
 struct FlightStack {
     gnc::VerticalNavFilter nav_filter;
+    gnc::HorizontalNavFilter horizontal_nav_filter;
     gnc::DescentGuidance guidance;
     gnc::PidController horizontal_pid;
     gnc::PidController vertical_pid;
@@ -164,6 +181,8 @@ struct FlightStack {
 
     [[nodiscard]] bool Init(const ApproachScenarioParams& params) noexcept {
         return IsSuccess(nav_filter.Init(MakeNavFilterConfig(params))) &&
+               IsSuccess(horizontal_nav_filter.Init(
+                   MakeHorizontalNavFilterConfig(params))) &&
                IsSuccess(guidance.Init(params.guidance)) &&
                IsSuccess(
                    horizontal_pid.Init(MakeHorizontalVelocityPidConfig())) &&
@@ -237,17 +256,17 @@ struct CycleCommands {
  *
  * @details Guidance -> velocity loops -> allocation -> attitude loop. On a
  *          flight-code fault the previous cycle's commands are held, as the
- *          flight executive would. The vertical channel consumes the
- *          navigation solution; the horizontal and attitude channels read
- *          truth (perfect navigation) until they get sensors of their own.
+ *          flight executive would. Both translation channels consume the
+ *          navigation solution; the attitude channel reads truth (perfect
+ *          navigation) until it gets a sensor of its own.
  *
  * @param   stack              Flight components (updated in place).
  * @param   truth              Current truth state.
  * @param   nav_altitude_m     Navigation altitude estimate, m.
  * @param   nav_velocity_z_mps Navigation vertical-velocity estimate, m/s.
- * @param   downrange_to_go_m  Signed ground distance to the landing site
- *                             (truth-derived: the horizontal channel flies
- *                             perfect navigation until TRN exists), m.
+ * @param   nav_velocity_x_mps Navigation ground-speed estimate, m/s.
+ * @param   downrange_to_go_m  Signed ground distance to the landing site,
+ *                             from the navigation position estimate, m.
  * @param   dt_s               Control interval, s.
  * @param   gcmd               In/out: last valid guidance command.
  * @param   previous           Commands held from the previous cycle.
@@ -256,9 +275,9 @@ struct CycleCommands {
  */
 [[nodiscard]] CycleCommands RunControlCycle(
     FlightStack& stack, const LanderState3Dof& truth, const F64 nav_altitude_m,
-    const F64 nav_velocity_z_mps, const F64 downrange_to_go_m, const F64 dt_s,
-    gnc::GuidanceCommand& gcmd, const CycleCommands& previous,
-    U32& fault_count) noexcept {
+    const F64 nav_velocity_z_mps, const F64 nav_velocity_x_mps,
+    const F64 downrange_to_go_m, const F64 dt_s, gnc::GuidanceCommand& gcmd,
+    const CycleCommands& previous, U32& fault_count) noexcept {
     CycleCommands cmds{};
     const F32 dt_f32 = static_cast<F32>(dt_s);
     bool faulted = false;
@@ -295,8 +314,8 @@ struct CycleCommands {
         F32 accel_x_cmd = 0.0F;
         F32 accel_z_corr = 0.0F;
         const Status sx = stack.horizontal_pid.Update(
-            gcmd.horizontal_rate_cmd_mps,
-            static_cast<F32>(truth.velocity_x_mps), dt_f32, &accel_x_cmd);
+            gcmd.horizontal_rate_cmd_mps, static_cast<F32>(nav_velocity_x_mps),
+            dt_f32, &accel_x_cmd);
         const Status sz = stack.vertical_pid.Update(
             gcmd.vertical_rate_cmd_mps, static_cast<F32>(nav_velocity_z_mps),
             dt_f32, &accel_z_corr);
@@ -392,9 +411,13 @@ Status RunApproachSim(const ApproachScenarioParams& params,
 
     ImuModel imu;
     AltimeterModel altimeter;
+    ImuModel imu_x;
+    TrnModel trn;
     if (!params.nav.use_perfect_navigation) {
         if (!IsSuccess(imu.Init(params.nav.imu)) ||
-            !IsSuccess(altimeter.Init(params.nav.altimeter))) {
+            !IsSuccess(altimeter.Init(params.nav.altimeter)) ||
+            !IsSuccess(imu_x.Init(params.nav.imu_x)) ||
+            !IsSuccess(trn.Init(params.nav.trn))) {
             return Status::kErrInvalidParam;
         }
     }
@@ -409,6 +432,7 @@ Status RunApproachSim(const ApproachScenarioParams& params,
 
     F64 time_s = 0.0;
     F64 prev_velocity_z_mps = params.gate.velocity_z_mps;
+    F64 prev_velocity_x_mps = params.gate.velocity_x_mps;
     F64 active_target_m = params.target_downrange_m;
     bool hda_scan_done = false;
     gnc::GuidanceCommand gcmd{};
@@ -417,14 +441,20 @@ Status RunApproachSim(const ApproachScenarioParams& params,
     for (U64 step = 0U; step < max_steps; ++step) {
         const LanderState3Dof& truth = dynamics.GetState();
 
-        /* --- Navigation: sensors -> flight filter -> estimate. -------- */
+        /* --- Navigation: sensors -> flight filters -> estimates. ------ */
         F64 nav_altitude_m = truth.altitude_m;
         F64 nav_velocity_z_mps = truth.velocity_z_mps;
+        F64 nav_downrange_m = truth.downrange_m;
+        F64 nav_velocity_x_mps = truth.velocity_x_mps;
         if (!params.nav.use_perfect_navigation) {
             if (step > 0U) {
                 /* The IMU's delta-v over the previous interval, corrupted
                  * by the sensor model. An accelerometer measures specific
-                 * force, hence the +g / -g bracket around the model.     */
+                 * force, hence the +g / -g bracket around the vertical
+                 * model; gravity has no horizontal component, so the
+                 * horizontal specific force is the acceleration itself.
+                 * The horizontal filter takes the measurement uncorrected
+                 * and applies its own bias estimate.                     */
                 const F64 accel_true_mps2 =
                     (truth.velocity_z_mps - prev_velocity_z_mps) / dt_s;
                 const F64 specific_force_meas_mps2 =
@@ -432,6 +462,15 @@ Status RunApproachSim(const ApproachScenarioParams& params,
                 if (IsFault(stack.nav_filter.Predict(
                         static_cast<F32>(specific_force_meas_mps2 -
                                          kLunarGravityMps2),
+                        static_cast<F32>(dt_s)))) {
+                    ++result_out->controller_fault_count;
+                }
+                const F64 accel_x_true_mps2 =
+                    (truth.velocity_x_mps - prev_velocity_x_mps) / dt_s;
+                const F64 accel_x_meas_mps2 =
+                    imu_x.MeasureAccel(accel_x_true_mps2);
+                if (IsFault(stack.horizontal_nav_filter.Predict(
+                        static_cast<F32>(accel_x_meas_mps2),
                         static_cast<F32>(dt_s)))) {
                     ++result_out->controller_fault_count;
                 }
@@ -448,12 +487,33 @@ Status RunApproachSim(const ApproachScenarioParams& params,
                     ++result_out->controller_fault_count;
                 }
             }
+            /* TRN fixes stop below the sensor's blind floor: the filter
+             * dead-reckons the terminal descent on the IMU alone.        */
+            if (((step % static_cast<U64>(trn.GetUpdateDivisor())) == 0U) &&
+                trn.IsAvailableAt(truth.altitude_m)) {
+                const F64 downrange_meas_m =
+                    trn.MeasurePosition(truth.downrange_m);
+                const Status trn_status =
+                    stack.horizontal_nav_filter.UpdatePosition(
+                        static_cast<F32>(downrange_meas_m));
+                if (IsSuccess(trn_status)) {
+                    ++result_out->trn_fix_count;
+                } else if (trn_status != Status::kErrMeasurementRejected) {
+                    ++result_out->controller_fault_count;
+                }
+            }
             const gnc::VerticalNavEstimate estimate =
                 stack.nav_filter.GetEstimate();
             nav_altitude_m = static_cast<F64>(estimate.altitude_m);
             nav_velocity_z_mps = static_cast<F64>(estimate.velocity_mps);
+            const gnc::HorizontalNavEstimate horizontal_estimate =
+                stack.horizontal_nav_filter.GetEstimate();
+            nav_downrange_m = static_cast<F64>(horizontal_estimate.downrange_m);
+            nav_velocity_x_mps =
+                static_cast<F64>(horizontal_estimate.velocity_mps);
         }
         prev_velocity_z_mps = truth.velocity_z_mps;
+        prev_velocity_x_mps = truth.velocity_x_mps;
 
         /* --- HDA decision gate (one-shot, during APPROACH). ------------ */
         if (params.hda.enabled && !hda_scan_done &&
@@ -483,10 +543,10 @@ Status RunApproachSim(const ApproachScenarioParams& params,
             }
         }
 
-        const F64 downrange_to_go_m = active_target_m - truth.downrange_m;
+        const F64 downrange_to_go_m = active_target_m - nav_downrange_m;
         cmds = RunControlCycle(stack, truth, nav_altitude_m, nav_velocity_z_mps,
-                               downrange_to_go_m, dt_s, gcmd, cmds,
-                               result_out->controller_fault_count);
+                               nav_velocity_x_mps, downrange_to_go_m, dt_s,
+                               gcmd, cmds, result_out->controller_fault_count);
 
         if (log_out != nullptr) {
             ApproachTelemetrySample sample{};
@@ -506,6 +566,8 @@ Status RunApproachSim(const ApproachScenarioParams& params,
             sample.mass_kg = truth.mass_kg;
             sample.nav_altitude_m = nav_altitude_m;
             sample.nav_velocity_z_mps = nav_velocity_z_mps;
+            sample.nav_downrange_m = nav_downrange_m;
+            sample.nav_velocity_x_mps = nav_velocity_x_mps;
             sample.mission_phase = static_cast<U8>(stack.executive.GetPhase());
             log_out->Record(sample);
         }
@@ -562,6 +624,20 @@ Status RunApproachSim(const ApproachScenarioParams& params,
         result_out->touchdown_nav_velocity_error_mps =
             std::fabs(static_cast<F64>(estimate.velocity_mps) -
                       final_state.velocity_z_mps);
+
+        const gnc::HorizontalNavEstimate horizontal_estimate =
+            stack.horizontal_nav_filter.GetEstimate();
+        result_out->trn_rejected_measurement_count =
+            stack.horizontal_nav_filter.GetRejectedMeasurementCount();
+        result_out->touchdown_nav_downrange_error_m =
+            std::fabs(static_cast<F64>(horizontal_estimate.downrange_m) -
+                      final_state.downrange_m);
+        result_out->touchdown_nav_velocity_x_error_mps =
+            std::fabs(static_cast<F64>(horizontal_estimate.velocity_mps) -
+                      final_state.velocity_x_mps);
+        result_out->touchdown_nav_bias_error_mps2 =
+            std::fabs(static_cast<F64>(horizontal_estimate.accel_bias_mps2) -
+                      params.nav.imu_x.accel_bias_mps2);
     }
     return Status::kSuccess;
 }

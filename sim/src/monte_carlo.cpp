@@ -104,6 +104,8 @@ class RunningStats {
         s.imu_accel_bias_mps2,
         s.nav_altitude_error_m,
         s.nav_velocity_error_mps,
+        s.nav_downrange_error_m,
+        s.nav_velocity_x_error_mps,
     };
     for (const F64 sigma : sigma_fields) { /* Bounded loop. */
         if (!std::isfinite(sigma) || (sigma < 0.0)) {
@@ -133,12 +135,13 @@ class RunningStats {
 /**
  * @brief   Generate the dispersed scenario for one run.
  *
- * @details Exactly eleven deviates are consumed per run in a fixed order,
- *          so the campaign is reproducible and every run is independent
- *          of how earlier runs terminated. Guardrail clamps keep extreme
- *          draws physical; the flight configuration (allocator) keeps the
- *          nominal engine model, so the truth engine's dispersion is a
- *          calibration mismatch the control loops must absorb.
+ * @details Exactly fourteen Gaussian deviates are consumed per run in a
+ *          fixed order (plus the two hazard draws), so the campaign is
+ *          reproducible and every run is independent of how earlier runs
+ *          terminated. Guardrail clamps keep extreme draws physical; the
+ *          flight configuration (allocator) keeps the nominal engine
+ *          model, so the truth engine's dispersion is a calibration
+ *          mismatch the control loops must absorb.
  *
  * @param   params  Campaign configuration (nominal center + sigmas).
  * @param   gen     Campaign dispersion-draw generator (advanced in place).
@@ -179,15 +182,22 @@ class RunningStats {
         Clamp(s.vehicle.specific_impulse_s + Draw(gen, sig.specific_impulse_s),
               150.0, 500.0);
 
-    /* Navigation: dispersed IMU bias, zero-centered handover errors, and
-     * per-run sensor-noise seeds.                                        */
+    /* Navigation: dispersed IMU biases (independent per channel),
+     * zero-centered handover errors for both filters, and per-run
+     * sensor-noise seeds for every sensor model.                         */
     s.nav.imu.accel_bias_mps2 += Draw(gen, sig.imu_accel_bias_mps2);
     s.nav.initial_altitude_error_m = Draw(gen, sig.nav_altitude_error_m);
     s.nav.initial_velocity_error_mps = Draw(gen, sig.nav_velocity_error_mps);
+    s.nav.imu_x.accel_bias_mps2 += Draw(gen, sig.imu_accel_bias_mps2);
+    s.nav.initial_downrange_error_m = Draw(gen, sig.nav_downrange_error_m);
+    s.nav.initial_velocity_x_error_mps =
+        Draw(gen, sig.nav_velocity_x_error_mps);
     const U64 run_salt = static_cast<U64>(run) + 1U;
-    s.nav.imu.noise_seed = MixSeed(params.base_seed, run_salt * 2U);
+    s.nav.imu.noise_seed = MixSeed(params.base_seed, run_salt * 4U);
     s.nav.altimeter.noise_seed =
-        MixSeed(params.base_seed, (run_salt * 2U) + 1U);
+        MixSeed(params.base_seed, (run_salt * 4U) + 1U);
+    s.nav.imu_x.noise_seed = MixSeed(params.base_seed, (run_salt * 4U) + 2U);
+    s.nav.trn.noise_seed = MixSeed(params.base_seed, (run_salt * 4U) + 3U);
 
     /* Terrain hazard: both deviates are always consumed so the draw
      * sequence stays aligned across hazard-probability settings.         */
@@ -229,6 +239,8 @@ struct CampaignStats {
     RunningStats propellant;
     RunningStats nav_altitude_error;
     RunningStats nav_velocity_error;
+    RunningStats nav_downrange_error;
+    RunningStats nav_velocity_x_error;
 };
 
 }  // namespace
@@ -280,9 +292,16 @@ Status RunMonteCarlo(const MonteCarloParams& params,
             record.nav_altitude_error_m = result.touchdown_nav_altitude_error_m;
             record.nav_velocity_error_mps =
                 result.touchdown_nav_velocity_error_mps;
+            record.nav_downrange_error_m =
+                result.touchdown_nav_downrange_error_m;
+            record.nav_velocity_x_error_mps =
+                result.touchdown_nav_velocity_x_error_mps;
             record.controller_fault_count = result.controller_fault_count;
             record.nav_rejected_measurement_count =
                 result.nav_rejected_measurement_count;
+            record.trn_fix_count = result.trn_fix_count;
+            record.trn_rejected_measurement_count =
+                result.trn_rejected_measurement_count;
             record.hda_diverted = result.hda_diverted;
             record.hda_divert_distance_m = result.hda_divert_distance_m;
             record.landed_on_hazard = result.landed_on_hazard;
@@ -308,10 +327,16 @@ Status RunMonteCarlo(const MonteCarloParams& params,
             stats.nav_altitude_error.Add(result.touchdown_nav_altitude_error_m);
             stats.nav_velocity_error.Add(
                 result.touchdown_nav_velocity_error_mps);
+            stats.nav_downrange_error.Add(
+                result.touchdown_nav_downrange_error_m);
+            stats.nav_velocity_x_error.Add(
+                result.touchdown_nav_velocity_x_error_mps);
             summary_out->total_controller_faults +=
                 result.controller_fault_count;
             summary_out->total_nav_rejected_measurements +=
                 result.nav_rejected_measurement_count;
+            summary_out->total_trn_rejected_measurements +=
+                result.trn_rejected_measurement_count;
         }
         /* else: scenario rejected (extreme user-supplied sigmas) — scored
          * as an unsafe run, excluded from the metric statistics.         */
@@ -337,6 +362,9 @@ Status RunMonteCarlo(const MonteCarloParams& params,
     summary_out->propellant_used_kg = stats.propellant.Finalize();
     summary_out->nav_altitude_error_m = stats.nav_altitude_error.Finalize();
     summary_out->nav_velocity_error_mps = stats.nav_velocity_error.Finalize();
+    summary_out->nav_downrange_error_m = stats.nav_downrange_error.Finalize();
+    summary_out->nav_velocity_x_error_mps =
+        stats.nav_velocity_x_error.Finalize();
     return Status::kSuccess;
 }
 

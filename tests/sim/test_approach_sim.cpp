@@ -280,7 +280,7 @@ TEST(ApproachSimNavigation, EstimatorConvergesAndTracksThroughTouchdown) {
 }
 
 TEST(ApproachSimNavigation, PerfectNavigationBaselineStillFlies) {
-    /* Milestone 2 regression: bypassing sensors + filter must still land
+    /* Milestone 2 regression: bypassing sensors + filters must still land
      * safely and must report zero navigation error by definition.        */
     ApproachScenarioParams params{};
     params.nav.use_perfect_navigation = true;
@@ -295,6 +295,11 @@ TEST(ApproachSimNavigation, PerfectNavigationBaselineStillFlies) {
     EXPECT_DOUBLE_EQ(result.touchdown_nav_altitude_error_m, 0.0);
     EXPECT_DOUBLE_EQ(result.touchdown_nav_velocity_error_mps, 0.0);
     EXPECT_EQ(result.nav_rejected_measurement_count, 0U);
+    EXPECT_DOUBLE_EQ(result.touchdown_nav_downrange_error_m, 0.0);
+    EXPECT_DOUBLE_EQ(result.touchdown_nav_velocity_x_error_mps, 0.0);
+    EXPECT_DOUBLE_EQ(result.touchdown_nav_bias_error_mps2, 0.0);
+    EXPECT_EQ(result.trn_fix_count, 0U);
+    EXPECT_EQ(result.trn_rejected_measurement_count, 0U);
 }
 
 TEST(ApproachSimNavigation, RejectsBadSensorConfiguration) {
@@ -303,6 +308,73 @@ TEST(ApproachSimNavigation, RejectsBadSensorConfiguration) {
     ApproachSimResult result{};
     EXPECT_EQ(RunApproachSim(params, &result, nullptr),
               Status::kErrInvalidParam);
+
+    params = ApproachScenarioParams{};
+    params.nav.trn.update_divisor = 0U; /* Model will refuse.             */
+    EXPECT_EQ(RunApproachSim(params, &result, nullptr),
+              Status::kErrInvalidParam);
+}
+
+/* ------------------------------------------------------------------ */
+/* Horizontal navigation in the loop (milestone 7)                     */
+/* ------------------------------------------------------------------ */
+
+TEST(ApproachSimHorizontalNav, EstimatorConvergesAndTracksThroughTouchdown) {
+    const ApproachScenarioParams params{};
+    ApproachSimResult result{};
+    static ApproachTelemetryLog log; /* ~3 MB: static, not stack. */
+    ASSERT_EQ(RunApproachSim(params, &result, &log), Status::kSuccess);
+    ASSERT_TRUE(result.touched_down);
+    ASSERT_GT(log.GetCount(), 500U);
+
+    /* The filter is seeded 10 m / 1 m/s off truth; after ten seconds
+     * (>= 50 TRN fixes at 5 Hz) it must have converged, and it must stay
+     * converged all the way down — including the blind terminal descent,
+     * where only the learned bias correction keeps dead reckoning honest. */
+    for (U32 i = 500U; i < log.GetCount(); ++i) { /* Bounded loop. */
+        const ApproachTelemetrySample& s = log.GetSample(i);
+        EXPECT_LT(std::fabs(s.nav_downrange_m - s.downrange_m), 5.0)
+            << "Downrange estimate diverged at t=" << s.time_s;
+        EXPECT_LT(std::fabs(s.nav_velocity_x_mps - s.velocity_x_mps), 0.5)
+            << "Ground-speed estimate diverged at t=" << s.time_s;
+    }
+
+    /* Touchdown-time estimate quality (what site targeting flew on).      */
+    EXPECT_LT(result.touchdown_nav_downrange_error_m, 5.0);
+    EXPECT_LT(result.touchdown_nav_velocity_x_error_mps, 0.3);
+
+    /* The 0.02 m/s^2 injected accelerometer bias must have been mostly
+     * identified while TRN could see the ground.                          */
+    EXPECT_LT(result.touchdown_nav_bias_error_mps2, 0.015);
+
+    /* TRN actually participated, and clean map matches this run: the
+     * innovation gate should stay quiet.                                  */
+    EXPECT_GT(result.trn_fix_count, 100U);
+    EXPECT_EQ(result.trn_rejected_measurement_count, 0U);
+}
+
+TEST(ApproachSimHorizontalNav, TrnBlindFloorStopsFixesEarly) {
+    /* Same mission, two sensors: one that tracks to the surface and one
+     * with the default 100 m blind floor. The blind-floor run must fuse
+     * strictly fewer fixes — the difference is the blackout the filter
+     * has to dead-reckon through.                                         */
+    ApproachScenarioParams params{};
+    params.nav.trn.min_altitude_m = 0.0;
+    ApproachSimResult all_the_way_down{};
+    ASSERT_EQ(RunApproachSim(params, &all_the_way_down, nullptr),
+              Status::kSuccess);
+
+    params = ApproachScenarioParams{};
+    ApproachSimResult blind_below_100m{};
+    ASSERT_EQ(RunApproachSim(params, &blind_below_100m, nullptr),
+              Status::kSuccess);
+
+    EXPECT_GT(all_the_way_down.trn_fix_count,
+              blind_below_100m.trn_fix_count + 50U)
+        << "The blind floor never actually blacked the sensor out";
+    EXPECT_TRUE(blind_below_100m.touched_down);
+    EXPECT_LE(blind_below_100m.touchdown_horizontal_speed_mps,
+              kHorizontalLimitMps);
 }
 
 /* ------------------------------------------------------------------ */

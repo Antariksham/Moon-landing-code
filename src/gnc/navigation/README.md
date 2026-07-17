@@ -19,10 +19,32 @@ sensor fusion.
   `sim/src/sensor_models.hpp`. Unit tested in
   `tests/gnc/test_vertical_nav_filter.cpp`.
 
+- **`horizontal_nav_filter.hpp`** — horizontal-channel navigation filter
+  (milestone 7). A 3-state (downrange, ground speed, accelerometer bias)
+  Kalman filter: IMU-acceleration predict at the control rate,
+  terrain-relative-navigation position update at the sensor rate, same
+  innovation-gate and F64-covariance doctrine as the vertical filter.
+
+  The third state is the difference from the vertical channel: TRN goes
+  blind below its minimum-altitude floor (100 m in the SIL model), so the
+  filter must dead-reckon the whole terminal descent on the IMU alone.
+  The accelerometer bias — learned while TRN can still see the ground —
+  is what keeps that dead reckoning honest; unestimated, a 0.02 m/s²
+  bias would integrate to ~1 m/s of phantom ground speed, most of the
+  touchdown budget.
+
+  In the SIL loop, guidance range-to-go (site targeting and divert
+  execution) and the horizontal-velocity control loop fly on this
+  filter's estimate. Unit tested in
+  `tests/gnc/test_horizontal_nav_filter.cpp`.
+
 ## Not yet implemented
 
-- Accelerometer bias estimation (third state).
-- Horizontal-channel estimation (terrain-relative navigation) and
-  attitude estimation (star tracker / gyro fusion) — the full EKF
-  formulation question is tracked in `docs/ARCHITECTURE.md` § Open design
+- Attitude estimation (star tracker / gyro fusion) — the attitude channel
+  still reads truth in the SIL loop.
+- Accelerometer bias state in the vertical filter (the horizontal filter
+  demonstrates the formulation; the vertical channel's frequent altimeter
+  updates make its bias less critical).
+- The full EKF formulation question (error-state vs. total-state for the
+  coupled channels) is tracked in `docs/ARCHITECTURE.md` § Open design
   questions.

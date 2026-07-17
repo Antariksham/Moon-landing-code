@@ -15,9 +15,11 @@
  *              specific impulse. The *flight* configuration (thrust
  *              allocator) keeps the nominal engine model — the control
  *              loops must absorb the calibration mismatch, as in flight.
- *            - Navigation: IMU accelerometer bias, filter handover errors
- *              (drawn centered on zero), and fresh sensor-noise seeds
- *              derived per run.
+ *            - Navigation: IMU accelerometer biases (vertical and
+ *              horizontal channels, drawn independently), filter handover
+ *              errors for both channels (drawn centered on zero), and
+ *              fresh sensor-noise seeds derived per run for every sensor
+ *              model (IMU x2, altimeter, TRN).
  *
  *          Every run is deterministic: one base seed fixes the entire
  *          campaign, so a Monte-Carlo failure is exactly reproducible by
@@ -74,11 +76,18 @@ struct DispersionSigmas {
                                        calibration tolerance.           */
     F64 specific_impulse_s = 3.0; /**< Engine performance.              */
 
-    F64 imu_accel_bias_mps2 = 0.01;   /**< Turn-on bias, around nominal.    */
-    F64 nav_altitude_error_m = 5.0;   /**< Filter handover seed error,
-                                           drawn centered on zero.          */
-    F64 nav_velocity_error_mps = 1.0; /**< Filter handover seed error,
-                                           drawn centered on zero.         */
+    F64 imu_accel_bias_mps2 = 0.01;     /**< Turn-on bias, around nominal.
+                                             Applied as independent draws to
+                                             the vertical and horizontal
+                                             accelerometer channels.         */
+    F64 nav_altitude_error_m = 5.0;     /**< Filter handover seed error,
+                                             drawn centered on zero.          */
+    F64 nav_velocity_error_mps = 1.0;   /**< Filter handover seed error,
+                                             drawn centered on zero.         */
+    F64 nav_downrange_error_m = 10.0;   /**< Horizontal filter handover seed
+                                             error, drawn centered on zero. */
+    F64 nav_velocity_x_error_mps = 1.0; /**< Horizontal filter handover seed
+                                             error, drawn centered on zero. */
 };
 
 /**
@@ -129,8 +138,12 @@ struct MonteCarloRunRecord {
     F64 propellant_used_kg = 0.0;
     F64 nav_altitude_error_m = 0.0;
     F64 nav_velocity_error_mps = 0.0;
+    F64 nav_downrange_error_m = 0.0;
+    F64 nav_velocity_x_error_mps = 0.0;
     U32 controller_fault_count = 0U;
     U32 nav_rejected_measurement_count = 0U;
+    U32 trn_fix_count = 0U;
+    U32 trn_rejected_measurement_count = 0U;
 
     bool hazard_zone_present = false; /**< This run drew a hazard zone.    */
     bool hda_diverted = false;        /**< HDA moved the landing site.     */
@@ -166,9 +179,14 @@ struct MonteCarloSummary {
     MetricStats propellant_used_kg{};     /**< Fuel budget statistic.        */
     MetricStats nav_altitude_error_m{};   /**< Estimator error at contact.   */
     MetricStats nav_velocity_error_mps{}; /**< Estimator error at contact. */
+    MetricStats nav_downrange_error_m{};  /**< Horizontal estimator error
+                                               at contact.               */
+    MetricStats nav_velocity_x_error_mps{}; /**< Horizontal estimator error
+                                                 at contact.               */
 
     U32 total_controller_faults = 0U; /**< Sum across all runs.          */
     U32 total_nav_rejected_measurements = 0U; /**< Sum across all runs.    */
+    U32 total_trn_rejected_measurements = 0U; /**< Sum across all runs.    */
 
     U32 hazard_zone_count = 0U;    /**< Runs that drew a hazard zone.       */
     U32 divert_count = 0U;         /**< Runs where HDA moved the site.      */
