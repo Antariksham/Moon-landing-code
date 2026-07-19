@@ -28,6 +28,7 @@
 #include <emscripten/bind.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <new>
 
@@ -41,6 +42,8 @@ struct WebScenarioConfig {
     double gateAltitudeM = 2000.0;
     double gateVelocityXMps = 60.0;
     double gateVelocityZMps = -30.0;
+    double gatePitchRad = -0.30;
+    double dryMassKg = 280.0;
     double targetDownrangeM = 1200.0;
     bool perfectNav = false;
     bool hazardAtTarget = false;
@@ -106,6 +109,45 @@ lls::sim::ApproachSimResult g_result{};
 bool g_has_run = false;
 double g_dt_s = 0.02; /* 50 Hz control rate — set again on each run. */
 
+/* Terrain hazard zones staged by the frontend before runScenario().
+ * The web terrain generator surveys its procedural surface and reports
+ * the rough stretches here so the flight HDA sees the same world the
+ * user sees rendered. One slot is reserved for the hazard-at-target
+ * demo toggle. */
+constexpr lls::U32 kMaxWebHazardZones =
+    lls::sim::TerrainModel::kMaxHazardZones - 1U;
+std::array<lls::sim::HazardZone, kMaxWebHazardZones> g_web_zones{};
+lls::U32 g_web_zone_count = 0U;
+
+/** @brief Drop all hazard zones staged by the frontend. */
+void clearHazardZones() {
+    g_web_zone_count = 0U;
+}
+
+/**
+ * @brief   Stage one terrain hazard interval for the next run.
+ * @return  true when the zone was accepted (finite, ordered, capacity).
+ */
+bool addHazardZone(const double startM, const double endM,
+                   const double slopeDeg, const double roughnessM) {
+    if (g_web_zone_count >= kMaxWebHazardZones) {
+        return false;
+    }
+    if (!std::isfinite(startM) || !std::isfinite(endM) ||
+        !std::isfinite(slopeDeg) || !std::isfinite(roughnessM) ||
+        (endM <= startM) || (slopeDeg < 0.0) || (roughnessM < 0.0)) {
+        return false;
+    }
+    lls::sim::HazardZone zone{};
+    zone.start_m = startM;
+    zone.end_m = endM;
+    zone.slope_deg = slopeDeg;
+    zone.roughness_m = roughnessM;
+    g_web_zones[g_web_zone_count] = zone;
+    ++g_web_zone_count;
+    return true;
+}
+
 /**
  * @brief Run one complete closed-loop descent with the flight stack.
  * @return true when the scenario was accepted and simulated.
@@ -115,15 +157,22 @@ bool runScenario(const WebScenarioConfig& cfg) {
     params.gate.altitude_m = cfg.gateAltitudeM;
     params.gate.velocity_x_mps = cfg.gateVelocityXMps;
     params.gate.velocity_z_mps = cfg.gateVelocityZMps;
+    params.gate.pitch_rad = cfg.gatePitchRad;
+    params.vehicle.dry_mass_kg = cfg.dryMassKg;
     params.target_downrange_m = cfg.targetDownrangeM;
     params.nav.use_perfect_navigation = cfg.perfectNav;
+    /* Terrain hazards staged by the frontend's procedural generator. */
+    for (lls::U32 i = 0U; i < g_web_zone_count; ++i) {
+        params.hazard_zones[params.hazard_zone_count] = g_web_zones[i];
+        ++params.hazard_zone_count;
+    }
     if (cfg.hazardAtTarget) {
         /* Demo scenario: a boulder field squarely on the nominal site. */
         lls::sim::HazardZone zone{};
         zone.start_m = cfg.targetDownrangeM - 40.0;
         zone.end_m = cfg.targetDownrangeM + 40.0;
-        params.hazard_zones[0] = zone;
-        params.hazard_zone_count = 1U;
+        params.hazard_zones[params.hazard_zone_count] = zone;
+        ++params.hazard_zone_count;
     }
 
     /* Reset the multi-megabyte log in place: assigning a temporary would
@@ -278,6 +327,8 @@ EMSCRIPTEN_BINDINGS(selene_fsw) {
         .field("gateAltitudeM", &WebScenarioConfig::gateAltitudeM)
         .field("gateVelocityXMps", &WebScenarioConfig::gateVelocityXMps)
         .field("gateVelocityZMps", &WebScenarioConfig::gateVelocityZMps)
+        .field("gatePitchRad", &WebScenarioConfig::gatePitchRad)
+        .field("dryMassKg", &WebScenarioConfig::dryMassKg)
         .field("targetDownrangeM", &WebScenarioConfig::targetDownrangeM)
         .field("perfectNav", &WebScenarioConfig::perfectNav)
         .field("hazardAtTarget", &WebScenarioConfig::hazardAtTarget);
@@ -329,6 +380,8 @@ EMSCRIPTEN_BINDINGS(selene_fsw) {
 
     emscripten::function("runScenario", &runScenario);
     emscripten::function("runDefaultScenario", &runDefaultScenario);
+    emscripten::function("clearHazardZones", &clearHazardZones);
+    emscripten::function("addHazardZone", &addHazardZone);
     emscripten::function("getStateAtTime", &getStateAtTime);
     emscripten::function("getResult", &getResult);
     emscripten::function("getFlightTimeS", &getFlightTimeS);
