@@ -67,6 +67,8 @@ assert(
     gateAltitudeM: 2500,
     gateVelocityXMps: 55,
     gateVelocityZMps: -25,
+    gatePitchRad: -0.3,
+    dryMassKg: 280,
     targetDownrangeM: 1200,
     perfectNav: false,
     hazardAtTarget: true,
@@ -78,5 +80,39 @@ console.log(
   `   hazard run: diverted=${hazardResult.hdaDiverted} ` +
   `(${hazardResult.hdaDivertDistanceM.toFixed(0)} m), safe=${hazardResult.safeLanding}`
 );
+
+// Stochastic mission shape: low gate, small drift, payload variance, and
+// terrain hazards staged from the (procedural) surface survey.
+assert(fsw.addHazardZone(-1e3, -990, 25, 1.0) === true, 'hazard zone staged');
+assert(fsw.addHazardZone(10, 5, 25, 1.0) === false, 'inverted zone rejected');
+assert(fsw.addHazardZone(0, Number.NaN, 25, 1.0) === false, 'NaN zone rejected');
+fsw.clearHazardZones();
+assert(fsw.addHazardZone(180, 260, 22, 0.8) === true, 'survey zone A staged');
+assert(fsw.addHazardZone(320, 344, 14, 0.5) === true, 'survey zone B staged');
+assert(
+  fsw.runScenario({
+    gateAltitudeM: 1100,
+    gateVelocityXMps: -4.0,
+    gateVelocityZMps: -18,
+    gatePitchRad: 0.0,
+    dryMassKg: 305,
+    targetDownrangeM: 240,
+    perfectNav: false,
+    hazardAtTarget: false,
+  }) === true,
+  'stochastic low-gate drift scenario accepted'
+);
+const stochasticResult = fsw.getResult();
+assert(stochasticResult.valid && stochasticResult.touchedDown,
+  'stochastic scenario reached the surface');
+assert(stochasticResult.hdaDiverted === true,
+  `HDA diverted off the staged survey hazard (${stochasticResult.hdaDivertDistanceM.toFixed(0)} m)`);
+console.log(
+  `   stochastic run: safe=${stochasticResult.safeLanding} ` +
+  `(vz=${stochasticResult.touchdownVerticalSpeedMps.toFixed(2)} m/s, ` +
+  `miss=${stochasticResult.touchdownMissM.toFixed(1)} m, ` +
+  `target=${stochasticResult.finalTargetDownrangeM.toFixed(0)} m)`
+);
+fsw.clearHazardZones();
 
 console.log('\nAll wasm bridge smoke tests passed.');
